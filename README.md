@@ -22,6 +22,7 @@ builds, verification, parallel rendering and delivery.
 | `assets/lib/` | Engines: `print.js` spot-ink print simulator, `hershey.js` single-stroke fonts, `font5x7.js` bitmap font, `synth.py` numpy synth + mixer + loudness master + mux |
 | `assets/blender/` | Blender helpers and a remote-GPU render script |
 | `scripts/` | Bundled tools: machine inventory (sh + ps1), contact sheets, before/after frame compare, mix measurement, delivery checks, page renderer, stills grid |
+| `THIRD_PARTY.md` | Audit of every third-party asset this skill bundles or loads, with its license |
 
 ## Install
 
@@ -56,3 +57,7 @@ The AGPL's section 13 network clause is satisfied by publishing the correspondin
 source in this public repository: <https://github.com/arrrnmp/motion-design>.
 Contributions and pull requests are welcome; contributions are accepted under the
 same AGPL-3.0-or-later terms.
+
+Every third-party asset the skill bundles or loads is recorded in
+[THIRD_PARTY.md](THIRD_PARTY.md) with its license, including one item still
+needing provenance review.

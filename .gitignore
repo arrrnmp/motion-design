@@ -2,14 +2,16 @@
 __pycache__/
 *.py[cod]
 
-# Render and scratch output from the bundled scripts
+# Render and scratch output. Deliberately narrow: the skill *bundles* media
+# (still.jpg plates, site/audio/loop.mp3), so a blanket *.mp4/*.wav rule would
+# silently drop shipped assets. Only ignore these inside style/pattern work dirs.
+assets/styles/*/out/
+assets/styles/*/renders/
+assets/styles/*/frames/
+assets/patterns/*/out/
+assets/patterns/*/renders/
 out/
-renders/
-frames/
-*.mp4
-*.mov
-*.wav
-*.mp3
+tmp/
 
 # OS noise
 .DS_Store
