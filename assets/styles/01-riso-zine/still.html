@@ -1,0 +1,172 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@800;900&family=Archivo:wght@500;700&display=block" rel="stylesheet">
+<style>html,body{margin:0;background:#f3f0e8}canvas{display:block}</style>
+</head><body><canvas id="c" width="1920" height="1080"></canvas>
+<script>
+/* RISO ZINE — two spot inks (Fluorescent Pink FF48B0, Medium Blue 3255A4) on uncoated stock.
+   Each ink is drawn as a density map, screened with its own halftone angle, given roller
+   unevenness + speckle, misregistered, then multiplied onto paper. */
+window.__ready = false;
+const W = 1920, H = 1080;
+const INKS = {
+  pink: { rgb: [255, 72, 176], angle: 15, cell: 11, offset: [0, 0], rot: 0 },
+  blue: { rgb: [50, 85, 164], angle: 75, cell: 11, offset: [7, -5], rot: 0.0025 },
+};
+const PAPER = [243, 240, 232];
+
+// seeded PRNG + value noise
+let seed = 7;
+const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+const perm = Array.from({ length: 512 }, () => rnd());
+function vnoise(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+  const h = (a, b) => perm[((a * 57 + b * 131) & 511 + 512) % 512];
+  const s = t => t * t * (3 - 2 * t);
+  const a = h(xi, yi), b = h(xi + 1, yi), c = h(xi, yi + 1), d = h(xi + 1, yi + 1);
+  return a + (b - a) * s(xf) + (c - a) * s(yf) + (a - b - c + d) * s(xf) * s(yf);
+}
+
+function layer() {
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  return cv.getContext('2d');
+}
+const tint = d => `rgba(0,0,0,${d})`;
+
+// ---- geometry -------------------------------------------------------------
+const CX = 560, CY = 590, R = 455;
+function beanPath(ctx, side) {
+  // D-shaped bean, flat face toward the cherry centre line
+  const bx = CX + side * 14, rx = 170, ry = 290;
+  ctx.beginPath();
+  ctx.ellipse(bx, CY + 10, rx, ry, 0, side > 0 ? -Math.PI / 2 : Math.PI / 2, side > 0 ? Math.PI / 2 : Math.PI * 1.5);
+  ctx.closePath();
+}
+function drawPink(ctx) {
+  // cherry skin (solid) + pulp (radial tint)
+  ctx.fillStyle = tint(1); ctx.beginPath(); ctx.arc(CX, CY, R, 0, 7); ctx.fill();
+  const g = ctx.createRadialGradient(CX - 60, CY - 40, 40, CX, CY, R - 44);
+  g.addColorStop(0, tint(0.18)); g.addColorStop(1, tint(0.62));
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.beginPath(); ctx.arc(CX, CY, R - 44, 0, 7); ctx.fill();
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(CX, CY, R - 44, 0, 7); ctx.fill();
+  // parchment ring around the seeds (paper knock-out)
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.lineWidth = 22; ctx.strokeStyle = '#000';
+  ctx.beginPath(); ctx.ellipse(CX, CY + 10, 385, 335, 0, 0, 7); ctx.stroke();
+  ctx.globalCompositeOperation = 'source-over';
+  // title word CHERRY, solid pink
+  ctx.font = '900 300px "Big Shoulders Display"';
+  ctx.fillStyle = tint(1); ctx.textBaseline = 'alphabetic';
+  ctx.fillText('CHERRY', 1060, 612);
+  regMarks(ctx);
+}
+function drawBlue(ctx) {
+  // two seeds, 88% tint, with the folded "silverskin" curl knocked out
+  [-1, 1].forEach(side => {
+    ctx.fillStyle = tint(0.9); beanPath(ctx, side); ctx.fill();
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.lineWidth = 16; ctx.lineCap = 'round'; ctx.strokeStyle = '#000';
+    const bx = CX + side * 14;
+    // classic crease: one S-curve down the middle of each seed, same handedness on both
+    const mx = bx + side * 88;
+    ctx.beginPath();
+    ctx.moveTo(mx - 10, CY - 215);
+    ctx.bezierCurveTo(mx + 45, CY - 110, mx - 45, CY - 20, mx + 5, CY + 70);
+    ctx.bezierCurveTo(mx + 40, CY + 140, mx - 5, CY + 200, mx + 10, CY + 235);
+    ctx.stroke();
+    ctx.globalCompositeOperation = 'source-over';
+  });
+  // stem + leaf, halftone
+  ctx.fillStyle = tint(1);
+  ctx.save(); ctx.translate(CX + 40, CY - R + 20);
+  ctx.beginPath(); ctx.moveTo(-10, 0); ctx.bezierCurveTo(-20, -60, 10, -110, 40, -150);
+  ctx.lineTo(56, -140); ctx.bezierCurveTo(30, -100, 10, -60, 14, 0); ctx.fill();
+  ctx.fillStyle = tint(0.55);
+  ctx.beginPath(); ctx.moveTo(40, -150);
+  ctx.bezierCurveTo(160, -250, 330, -200, 420, -120);
+  ctx.bezierCurveTo(300, -60, 140, -60, 40, -150); ctx.fill();
+  ctx.restore();
+  // type
+  // stamp badge
+  ctx.save(); ctx.translate(250, 175); ctx.rotate(-0.22);
+  ctx.lineWidth = 7; ctx.strokeStyle = tint(1);
+  ctx.beginPath(); ctx.arc(0, 0, 118, 0, 7); ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, 0, 100, 0, 7); ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = tint(1); ctx.textAlign = 'center';
+  ctx.font = '900 88px "Big Shoulders Display"'; ctx.fillText('Nº3', 0, 22);
+  ctx.font = '700 22px "Archivo"'; ctx.fillText('THE COFFEE ISSUE', 0, 64);
+  ctx.restore();
+  ctx.textAlign = 'left';
+  ctx.fillStyle = tint(1);
+  ctx.font = '900 300px "Big Shoulders Display"';
+  ctx.fillText('FROM', 1060, 330);
+  ctx.fillText('TO CUP', 1060, 892);
+  ctx.font = '500 38px "Archivo"';
+  ['Every coffee cherry hides two seeds.', 'Roast them and they’re beans.'].forEach((l, i) => ctx.fillText(l, 1068, 972 + i * 50));
+  regMarks(ctx);
+}
+function regMarks(ctx) {
+  [[60, 60], [W - 60, H - 60]].forEach(([x, y]) => {
+    ctx.strokeStyle = tint(1); ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(x, y, 18, 0, 7); ctx.moveTo(x - 32, y); ctx.lineTo(x + 32, y);
+    ctx.moveTo(x, y - 32); ctx.lineTo(x, y + 32); ctx.stroke();
+  });
+}
+
+// ---- screening + print ----------------------------------------------------
+function screen(ctx, ink) {
+  const a = ctx.getImageData(0, 0, W, H).data;
+  const cov = new Float32Array(W * H);
+  const th = ink.angle * Math.PI / 180, cs = Math.cos(th), sn = Math.sin(th), k = 2 * Math.PI / ink.cell;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x, d = a[i * 4 + 3] / 255;
+    if (d <= 0.001) continue;
+    let c;
+    if (d > 0.97) {
+      c = 1 - (rnd() < 0.035 ? 0.55 : 0) ; // speckle voids in solids
+    } else {
+      const u = (x * cs + y * sn) * k, v = (-x * sn + y * cs) * k;
+      const s = 0.5 + 0.25 * (Math.cos(u) + Math.cos(v));
+      c = d > 1 - s ? 1 : 0;
+    }
+    const roller = 0.82 + 0.18 * vnoise(x / 260, y / 90) ;   // uneven drum inking
+    const grain = 0.9 + 0.1 * rnd();
+    cov[i] = c * roller * grain;
+  }
+  return cov;
+}
+
+async function main() {
+  await document.fonts.load('900 100px "Big Shoulders Display"');
+  await document.fonts.load('500 40px "Archivo"');
+  await document.fonts.load('700 22px "Archivo"');
+  const pinkCtx = layer(); drawPink(pinkCtx);
+  const blueCtx = layer(); drawBlue(blueCtx);
+  const layers = [[INKS.pink, screen(pinkCtx, INKS.pink)], [INKS.blue, screen(blueCtx, INKS.blue)]];
+
+  const out = document.getElementById('c').getContext('2d');
+  const img = out.createImageData(W, H), px = img.data;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const o = (y * W + x) * 4;
+    const paperN = 1 - 0.035 * rnd() - 0.03 * vnoise(x / 3, y / 3);
+    let r = PAPER[0] * paperN, g = PAPER[1] * paperN, b = PAPER[2] * paperN;
+    for (const [ink, cov] of layers) {
+      // misregistration: sample the plate with a shift + tiny rotation
+      const dx = x - W / 2, dy = y - H / 2;
+      const sx = Math.round(W / 2 + dx - dy * ink.rot - ink.offset[0]);
+      const sy = Math.round(H / 2 + dy + dx * ink.rot - ink.offset[1]);
+      if (sx < 0 || sy < 0 || sx >= W || sy >= H) continue;
+      const c = cov[sy * W + sx]; if (!c) continue;
+      r *= 1 - c * (1 - ink.rgb[0] / 255);
+      g *= 1 - c * (1 - ink.rgb[1] / 255);
+      b *= 1 - c * (1 - ink.rgb[2] / 255);
+    }
+    px[o] = r; px[o + 1] = g; px[o + 2] = b; px[o + 3] = 255;
+  }
+  out.putImageData(img, 0, 0);
+  window.__ready = true;
+}
+main();
+</script></body></html>

@@ -1,0 +1,223 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>html,body{margin:0;background:#e8dcc4}canvas{display:block}</style>
+<script src="../../lib/font5x7.js"></script>
+</head><body><canvas id="c" width="1920" height="1080"></canvas>
+<script>
+/* CROSS-STITCH — animated (12 fps, 10 s). Stitch ops are collected, ordered by motif (wreath around from the
+   top, title letter by letter, the story row left to right, TO CUP last, ending on the unfinished P), and the
+   first n are drawn each frame with the needle leading; the last second holds with the needle at rest.
+   Original still notes: a sampler in an embroidery hoop, left unfinished. Aida cloth (woven blocks, holes at
+   every corner); each X is two floss strokes (bottom / then top \\ — always the same order, like a
+   real stitcher), each stroke lit with a sheen, ply twist and a cast shadow into the cloth; outlines
+   and steam in backstitch; a stitched wreath (backstitch vine, leaves, cherry pairs, beans) as the frame; floss bobbins and a needle with its thread still
+   in the last stitch. Motion rule: it stitches itself in, one X at a time (two strokes each), the
+   needle leading; the hoop never moves; occasional thread tug. */
+window.__ready = false;
+const W = 1920, H = 1080, g = document.getElementById('c').getContext('2d');
+let sd = 16; const rnd = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
+const P = new Float32Array(1024); for (let i = 0; i < 1024; i++) P[i] = rnd();
+const h2 = (x, y) => P[((x * 73 + y * 151) % 1024 + 1024) % 1024];
+function vn(x, y) { const X = Math.floor(x), Y = Math.floor(y), fx = x - X, fy = y - Y, s = t => t * t * (3 - 2 * t);
+  const a = h2(X, Y), b = h2(X + 1, Y), c = h2(X, Y + 1), d = h2(X + 1, Y + 1);
+  return a + (b - a) * s(fx) + (c - a) * s(fy) + (a - b - c + d) * s(fx) * s(fy); }
+
+const HC = { x: 1000, y: 546 }, RIN = 600, CELL = 13, N = 86, OFF = 8;          // motifs are authored on a 70-cell grid, offset by OFF
+const gx0 = HC.x - N / 2 * CELL, gy0 = HC.y - N / 2 * CELL;
+const hole = (i, j) => [gx0 + (i + OFF) * CELL, gy0 + (j + OFF) * CELL];
+const inHoop = (x, y) => Math.hypot(x - HC.x, y - HC.y) < RIN;
+
+// ------------------------------------------------------------ palette (floss colours)
+const F = { red: '#b8222b', redDk: '#7a1620', redHi: '#e45a5f', leaf: '#3e7a3a', leafHi: '#77ad54', seed: '#cdd69a', seedDk: '#98ad62',
+  cream: '#8fb3d9', band: '#2c5288', coffee: '#5a3421', title: '#a3202a', title2: '#5a3421', border: '#6e9f58', back: '#35271f', steam: '#8fa2b5', stem: '#6b4a2b' };
+
+// ------------------------------------------------------------ the pattern (70x70 cells)
+const pat = Array.from({ length: N }, () => new Array(N).fill(null));
+const put = (i, j, c) => { i = Math.round(i) + OFF; j = Math.round(j) + OFF; if (i >= 0 && j >= 0 && i < N && j < N) pat[j][i] = c; };
+const at = (i, j) => pat[j + OFF][i + OFF];
+function text(str, i0, j0, col) { [...str].forEach((ch, k) => { const gl = FONT5x7[ch] || FONT5x7[' ']; for (let r = 0; r < 7; r++) for (let q = 0; q < 5; q++) if (gl[r * 5 + q] === '#') put(i0 + k * 6 + q, j0 + r, col); }); }
+const disc = (ci, cj, r, col, hiCol) => { for (let j = -r; j <= r; j++) for (let i = -r; i <= r; i++) if (i * i + j * j <= r * r) put(ci + i, cj + j, (hiCol && i < 0 && j < 0 && (i + j) > -r && (i * i + j * j) > r * r * 0.15 && i + j < -1) ? hiCol : col); };
+const ell = (ci, cj, rx, ry, rot, col) => { for (let j = -12; j <= 12; j++) for (let i = -12; i <= 12; i++) { const u = (i * Math.cos(rot) + j * Math.sin(rot)) / rx, v = (-i * Math.sin(rot) + j * Math.cos(rot)) / ry; if (u * u + v * v <= 1) put(ci + i, cj + j, col); } };
+// title
+text('FROM', 23, 6, F.title); text('CHERRY', 17, 15, F.title);
+text('TO CUP', 17, 57, F.title2);
+// wreath: a cross-stitched vine with laurel-paired leaves; cherry clusters and bean pairs at six points
+const WR = 35.5, FRUIT = [];
+const cellsOnVine = new Set();
+for (let k = 0; k < 720; k++) { const a = k / 720 * Math.PI * 2, r = WR + 0.45 * Math.sin(a * 9); const i = Math.round(35 + Math.cos(a) * r - 0.5), j = Math.round(35 + Math.sin(a) * r - 0.5); cellsOnVine.add(i + ',' + j); }
+cellsOnVine.forEach(c => { const [i, j] = c.split(',').map(Number); put(i, j, F.stem); });
+const fruitAng = [0, 1, 2, 3, 4, 5].map(q => (q / 6) * Math.PI * 2 - Math.PI / 2 + Math.PI / 6);
+for (let k = 0; k < 36; k++) {
+  const a = (k + 0.5) / 36 * Math.PI * 2 - Math.PI / 2;
+  if (fruitAng.some(fa => Math.abs(Math.atan2(Math.sin(a - fa), Math.cos(a - fa))) < 0.13)) continue;
+  for (const side of [-1, 1]) {
+    const r = WR + side * 2.4, tang = a + Math.PI / 2;
+    ell(35 + Math.cos(a) * r + Math.cos(tang) * 0.8, 35 + Math.sin(a) * r + Math.sin(tang) * 0.8, 2.6, 1.15, tang - side * 0.55, (k + (side > 0)) % 3 ? F.leaf : F.leafHi);
+  }
+}
+fruitAng.forEach((a, q) => {
+  const ci = 35 + Math.cos(a) * WR, cj = 35 + Math.sin(a) * WR, tx = -Math.sin(a), ty = Math.cos(a);
+  if (q % 2 === 0) { [[-1.7, 0.4], [1.7, 0.4], [0, -1.3]].forEach(([u, w]) => disc(ci + tx * u + Math.cos(a) * w, cj + ty * u + Math.sin(a) * w, 1.6, F.red, F.redHi)); }
+  else { [-1.7, 1.7].forEach(u => ell(ci + tx * u, cj + ty * u, 1.5, 2.3, a, '#9a6232')); }
+  FRUIT.push([ci, cj, tx, ty, q % 2 === 0, a]);
+});
+// cherries on a branch (left), leaf
+ell(22, 31, 5, 2, -0.5, F.leaf); ell(21, 30.5, 3, 0.8, -0.5, F.leafHi);
+disc(12, 43, 3.6, F.red, F.redHi); disc(20, 45, 3.6, F.red, F.redHi);
+// two seeds (centre)
+ell(31, 42, 2.4, 4.2, 0.2, F.seed); ell(37, 42, 2.4, 4.2, -0.2, F.seed);
+// cup (right): body, blue band, coffee, saucer
+for (let j = 34; j <= 49; j++) { const half = 8 - Math.floor((j - 34) / 5); for (let i = 52 - half; i <= 52 + half; i++) put(i, j, j >= 39 && j <= 41 ? F.band : F.cream); }
+for (let i = 44; i <= 60; i++) put(i, 34, F.coffee);
+for (let i = 42; i <= 62; i++) { put(i, 51, F.cream); if (i > 43 && i < 61) put(i, 50, F.cream); }
+// UNFINISHED: remove the last stitches of the P and mark 3 half-stitches
+const HALF = new Set();
+{ const cells = []; for (let j = 57; j < 64; j++) for (let i = 47; i < 52; i++) if (at(i, j)) cells.push([i, j]);
+  cells.sort((a, b) => (a[1] - b[1]) || (a[0] - b[0]));
+  const stem = cells.filter(([i]) => i === 47).slice(-3); stem.forEach(([i, j], k) => { if (k < 2) HALF.add((i + OFF) + ',' + (j + OFF)); else pat[j + OFF][i + OFF] = null; }); }
+
+// ------------------------------------------------------------ drawing: table, cloth, stitches
+function thread(x0, y0, x1, y1, col, w, twist = true) {
+  const dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy), nx = -dy / L, ny = dx / L;
+  g.lineCap = 'round';
+  g.strokeStyle = 'rgba(40,25,10,.35)'; g.lineWidth = w + 1.5; g.beginPath(); g.moveTo(x0 + 1.4, y0 + 1.8); g.lineTo(x1 + 1.4, y1 + 1.8); g.stroke();   // shadow
+  g.strokeStyle = shade(col, -0.25); g.lineWidth = w; g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke();
+  g.strokeStyle = col; g.lineWidth = w * 0.72; g.beginPath(); g.moveTo(x0 - nx * w * .08, y0 - ny * w * .08); g.lineTo(x1 - nx * w * .08, y1 - ny * w * .08); g.stroke();
+  g.strokeStyle = shade(col, 0.35); g.lineWidth = w * 0.22; g.beginPath(); g.moveTo(x0 - nx * w * .22 + dx * .12, y0 - ny * w * .22 + dy * .12); g.lineTo(x1 - nx * w * .22 - dx * .12, y1 - ny * w * .22 - dy * .12); g.stroke();   // sheen
+  if (twist) { g.strokeStyle = shade(col, -0.35); g.lineWidth = 0.8;                                             // ply twist
+    for (let t = 0.18; t < 0.9; t += 0.16) { const cx = x0 + dx * t, cy = y0 + dy * t; g.beginPath(); g.moveTo(cx - nx * w * .4 - dx / L * 2, cy - ny * w * .4 - dy / L * 2); g.lineTo(cx + nx * w * .4 + dx / L * 2, cy + ny * w * .4 + dy / L * 2); g.stroke(); } }
+}
+function shade(hex, k) { const n = parseInt(hex.slice(1), 16), c = [n >> 16, (n >> 8) & 255, n & 255].map(v => Math.round(k < 0 ? v * (1 + k) : v + (255 - v) * k)); return `rgb(${c})`; }
+
+// cloth everywhere (outside the hoop it lies looser: softer, with folds)
+const img = g.createImageData(W, H), d = img.data;
+for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+  const o = (y * W + x) * 4, inside = inHoop(x, y);
+  const u = ((x - gx0) % CELL + CELL) % CELL, v = ((y - gy0) % CELL + CELL) % CELL;
+  const block = Math.min(u, CELL - u, v, CELL - v);                                   // woven block: raised centre
+  let b = 0.86 + 0.1 * Math.min(1, block / 4) + 0.04 * (vn(x / 1.5, y / 6) - 0.5) + 0.03 * (vn(x / 6, y / 1.5) - 0.5);
+  const isHole = (u < 2.2 || u > CELL - 2.2) && (v < 2.2 || v > CELL - 2.2);
+  if (isHole) b *= 0.55;
+  b *= 0.96 + 0.06 * (vn(x / 260, y / 140) - 0.5) + 0.03 * Math.sin((x * 0.6 + y) / 90 + vn(x / 300, y / 300) * 6);
+  const dist = Math.hypot(x - HC.x, y - HC.y);
+  d[o] = 236 * b; d[o + 1] = 226 * b; d[o + 2] = 204 * b; d[o + 3] = 255;
+}
+const CLOTH = document.createElement('canvas'); CLOTH.width = W; CLOTH.height = H; CLOTH.getContext('2d').putImageData(img, 0, 0);
+
+// ---- ops: every cross (both legs) and every backstitch segment, with an order key
+const SW = 4.2, OPS = [];
+function crossKey(i, j) {                                    // i, j in motif coords
+  const r = Math.hypot(i + 0.5 - 35, j + 0.5 - 35);
+  if (r > 31) { let a = Math.atan2(j + 0.5 - 35, i + 0.5 - 35) + Math.PI / 2; a = (a + Math.PI * 4) % (Math.PI * 2); return a / (Math.PI * 2); }
+  if (j < 14) return 1 + i / 200 + j / 40000;
+  if (j < 24) return 1.5 + i / 200 + j / 40000;
+  if (j < 55) return 2 + i / 100 + j / 10000;
+  return 3 + i / 200 + j / 40000;
+}
+for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+  const col = pat[j][i]; if (!col) continue;
+  OPS.push({ kind: 'x', i, j, col, half: HALF.has(i + ',' + j), key: crossKey(i - OFF, j - OFF) });
+}
+function back(pts, col = F.back, w = 2.8, key = 2.5) { for (let k = 0; k + 1 < pts.length; k++) OPS.push({ kind: 'b', a: pts[k], b: pts[k + 1], col, w, key: key + k * 1e-5 }); }
+back([[44, 34], [47, 50], [58, 50], [61, 34], [44, 34]], F.back, 2.8, 2.605);
+back([[61, 36], [63, 36], [64, 38], [64, 42], [63, 44], [60, 44]], F.back, 2.8, 2.645);
+back([[42, 52], [62, 52]], F.back, 2.8, 2.646); back([[42, 51], [42, 52]], F.back, 2.8, 2.647); back([[62, 51], [62, 52]], F.back, 2.8, 2.648);
+[[48, 32, 1], [52, 31, -1], [56, 32, 1]].forEach(([i, j, s], k) => back([[i, j], [i + s, j - 2], [i, j - 4], [i + s, j - 6], [i, j - 8]], F.steam, 2.4, 2.65 + k * 0.001));
+back([[12, 40], [13, 36], [16, 33], [18, 32]], F.stem, 2.6, 2.225); back([[20, 42], [19, 37], [18, 32]], F.stem, 2.6, 2.226);
+back([[31, 38], [32, 40], [31, 43], [32, 46]], F.seedDk, 2.2, 2.335); back([[37, 38], [36, 40], [37, 43], [36, 46]], F.seedDk, 2.2, 2.395);
+back([[23, 43], [26, 43]], F.back, 2.4, 2.265); back([[25, 42], [26, 43], [25, 44]], F.back, 2.4, 2.266);
+back([[40, 43], [43, 43]], F.back, 2.4, 2.435); back([[42, 42], [43, 43], [42, 44]], F.back, 2.4, 2.436);
+FRUIT.forEach(([ci, cj, tx, ty, cherry, a]) => { if (cherry) return;
+  let k = Math.atan2(cj + 0.5 - 35, ci + 0.5 - 35) + Math.PI / 2; k = ((k + Math.PI * 4) % (Math.PI * 2)) / (Math.PI * 2) + 0.004;
+  [-1.7, 1.7].forEach(u => { const bi = ci + tx * u, bj = cj + ty * u, ax = Math.cos(a), ay = Math.sin(a);
+    back([[Math.round(bi - ax * 1.2), Math.round(bj - ay * 1.2)], [Math.round(bi + ax * 1.2), Math.round(bj + ay * 1.2)]], '#3a2212', 2.0, k); }); });
+OPS.sort((p, q) => p.key - q.key);
+function drawOp(op) {
+  if (op.kind === 'x') {
+    const { i, j, col } = op, jit = pass => (h2(i * 3 + pass, j * 7) - 0.5) * 1.4;
+    const [x0, y0] = hole(i - OFF, j - OFF), [x1, y1] = hole(i + 1 - OFF, j + 1 - OFF);
+    thread(x0 + 1.5 + jit(0), y1 - 1.5, x1 - 1.5, y0 + 1.5 + jit(0), col, SW);
+    if (!op.half) thread(x0 + 1.5, y0 + 1.5 + jit(1), x1 - 1.5 + jit(1), y1 - 1.5, col, SW);
+    return [x1 - 1.5, y1 - 1.5];
+  }
+  const [a, b] = [hole(...op.a), hole(...op.b)]; thread(a[0], a[1], b[0], b[1], op.col, op.w, false); return b;
+}
+function drawProps() {
+// ------------------------------------------------------------ props: skeins (left), needle + thread (in the unfinished P)
+function bobbin(x, y, rot, col, label) {
+  // a floss card bobbin: notched card, floss wound around its waist, number printed on the card
+  g.save(); g.translate(x, y); g.rotate(rot);
+  const card = () => { g.beginPath(); g.moveTo(-55, -80); g.lineTo(-12, -80); g.lineTo(0, -66); g.lineTo(12, -80); g.lineTo(55, -80); g.lineTo(55, 80); g.lineTo(12, 80); g.lineTo(0, 66); g.lineTo(-12, 80); g.lineTo(-55, 80); g.closePath(); };
+  g.save(); g.shadowColor = 'rgba(40,25,10,.35)'; g.shadowBlur = 10; g.shadowOffsetX = 5; g.shadowOffsetY = 8; g.fillStyle = '#efe6d2'; card(); g.fill(); g.restore();
+  g.strokeStyle = 'rgba(120,100,70,.5)'; g.lineWidth = 1; card(); g.stroke();
+  const wg = g.createLinearGradient(-60, 0, 60, 0); wg.addColorStop(0, shade(col, -0.35)); wg.addColorStop(0.35, shade(col, 0.2)); wg.addColorStop(0.7, col); wg.addColorStop(1, shade(col, -0.4));
+  g.fillStyle = wg; g.fillRect(-60, -34, 120, 70);
+  for (let k = 0; k < 34; k++) { g.strokeStyle = k % 2 ? shade(col, -0.25) : shade(col, 0.15); g.lineWidth = 1.1; g.beginPath(); g.moveTo(-60, -33 + k * 2.05 + (h2(k, 9) - .5)); g.lineTo(60, -33 + k * 2.05 + (h2(9, k) - .5)); g.stroke(); }
+  g.fillStyle = '#3a3128'; g.font = '700 22px Georgia'; g.textAlign = 'center'; g.fillText(label, 0, -46);
+  // loose end tucked into the notch
+  g.strokeStyle = col; g.lineWidth = 2.6; g.beginPath(); g.moveTo(40, 36); g.bezierCurveTo(46, 60, 20, 70, 2, 70); g.stroke();
+  g.restore();
+}
+bobbin(120, 810, -0.28, F.red, '321'); bobbin(250, 850, 0.08, F.leaf, '3346'); bobbin(170, 975, 0.34, F.coffee, '898');
+// a snipped thread tail on the cloth
+g.strokeStyle = F.red; g.lineWidth = 2.6; g.lineCap = 'round'; g.beginPath(); g.moveTo(330, 980); g.bezierCurveTo(380, 950, 360, 1010, 420, 995); g.stroke();
+}
+function restingNeedle() {
+// needle lying on the cloth, thread running into the last half-stitch
+const [ex, ey] = hole(47, 62);
+g.save(); g.shadowColor = 'rgba(40,25,10,.4)'; g.shadowBlur = 8; g.shadowOffsetX = 4; g.shadowOffsetY = 6;
+const nd = g.createLinearGradient(0, -3, 0, 3); nd.addColorStop(0, '#f2f4f6'); nd.addColorStop(0.5, '#9aa3ad'); nd.addColorStop(1, '#5d646c');
+g.translate(1450, 900); g.rotate(-0.45); g.fillStyle = nd; g.beginPath(); g.moveTo(-150, -3); g.lineTo(140, -2); g.lineTo(160, 0); g.lineTo(140, 2); g.lineTo(-150, 3); g.closePath(); g.fill();
+g.fillStyle = '#e8dcc4'; g.beginPath(); g.ellipse(-132, 0, 10, 1.4, 0, 0, 7); g.fill(); g.restore();
+const eye = [1450 + Math.cos(-0.45) * -132, 900 + Math.sin(-0.45) * -132];
+g.lineCap = 'round';
+g.strokeStyle = 'rgba(40,25,10,.3)'; g.lineWidth = 4; g.beginPath(); g.moveTo(ex + 2, ey + 3); g.bezierCurveTo(ex + 120, ey + 150, eye[0] - 120, eye[1] + 60, eye[0] + 2, eye[1] + 3); g.stroke();
+g.strokeStyle = F.title2; g.lineWidth = 3.4; g.beginPath(); g.moveTo(ex, ey); g.bezierCurveTo(ex + 120, ey + 146, eye[0] - 120, eye[1] + 56, eye[0], eye[1]); g.stroke();
+g.strokeStyle = shade(F.title2, 0.35); g.lineWidth = 1; g.beginPath(); g.moveTo(ex, ey - 1); g.bezierCurveTo(ex + 120, ey + 145, eye[0] - 120, eye[1] + 55, eye[0], eye[1] - 1); g.stroke();
+// tail of thread through the eye
+g.strokeStyle = F.title2; g.lineWidth = 3.4; g.beginPath(); g.moveTo(eye[0], eye[1]); g.bezierCurveTo(eye[0] - 30, eye[1] - 50, eye[0] + 40, eye[1] - 80, eye[0] + 20, eye[1] - 130); g.stroke();
+
+}
+function light() {
+// soft window light: warm top-left, falloff bottom-right
+const lg = g.createLinearGradient(0, 0, W, H); lg.addColorStop(0, 'rgba(255,240,210,.10)'); lg.addColorStop(1, 'rgba(60,35,10,.22)');
+g.fillStyle = lg; g.fillRect(0, 0, W, H);
+}
+
+function needleAt(x, y, prev, f) {
+  // the working needle: points down into the fabric at (x, y), thread trailing from its eye back to the last stitch
+  const ang = -0.9 + 0.08 * Math.sin(f * 0.9), L = 300;
+  const tip = [x, y], eye = [x + Math.cos(ang) * L, y + Math.sin(ang) * L * 0.55 - 120];
+  g.save(); g.shadowColor = 'rgba(40,25,10,.35)'; g.shadowBlur = 8; g.shadowOffsetX = 5; g.shadowOffsetY = 8;
+  const nd = g.createLinearGradient(0, -3, 0, 3); nd.addColorStop(0, '#f2f4f6'); nd.addColorStop(0.5, '#9aa3ad'); nd.addColorStop(1, '#5d646c');
+  const a = Math.atan2(tip[1] - eye[1], tip[0] - eye[0]), len = Math.hypot(tip[0] - eye[0], tip[1] - eye[1]);
+  g.translate(eye[0], eye[1]); g.rotate(a); g.fillStyle = nd;
+  g.beginPath(); g.moveTo(0, -3); g.lineTo(len - 20, -2); g.lineTo(len, 0); g.lineTo(len - 20, 2); g.lineTo(0, 3); g.closePath(); g.fill();
+  g.fillStyle = '#e8dcc4'; g.beginPath(); g.ellipse(14, 0, 9, 1.3, 0, 0, 7); g.fill(); g.restore();
+  // thread: from the eye, sagging, back down to the previous stitch
+  const col = prev ? prev.col : F.title2;
+  g.strokeStyle = 'rgba(40,25,10,.25)'; g.lineWidth = 4; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(eye[0] + 2, eye[1] + 4); g.bezierCurveTo(eye[0] + 60, eye[1] + 200, x + 120, y + 60, x + 4, y + 6); g.stroke();
+  g.strokeStyle = col; g.lineWidth = 3.2;
+  g.beginPath(); g.moveTo(eye[0], eye[1]); g.bezierCurveTo(eye[0] + 60, eye[1] + 196, x + 120, y + 56, x, y); g.stroke();
+}
+const FRAMES = 120, STITCH_END = 106;
+const easeInOut = t => t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t);
+// time budget per motif (frames): wreath, title, story row, TO CUP
+const GROUPS = [[0, 1, 4, 32], [1, 2, 34, 58], [2, 3, 60, 90], [3, 9, 91, STITCH_END]].map(([k0, k1, f0, f1]) => ({ n0: OPS.findIndex(o => o.key >= k0), n1: (i => i < 0 ? OPS.length : i)(OPS.findIndex(o => o.key >= k1)), f0, f1 }));
+const countAt = f => { let n = 0; for (const G of GROUPS) { if (f >= G.f1) n = G.n1; else if (f >= G.f0) n = G.n0 + Math.round((G.n1 - G.n0) * easeInOut((f - G.f0) / (G.f1 - G.f0))); } return n; };
+window.EVENTS = Array.from({ length: FRAMES }, (_, f) => { const a = f ? countAt(f - 1) : 0, b = countAt(f); const seg = OPS.slice(a, b); return { x: seg.filter(o => o.kind === 'x').length, b: seg.filter(o => o.kind === 'b').length, key: seg.length ? seg[seg.length - 1].key : null }; });
+function drawFrame(f) {
+  g.drawImage(CLOTH, 0, 0);
+  drawProps();
+  const n = countAt(f); let last = null, lastOp = null;
+  for (let k = 0; k < n; k++) { last = drawOp(OPS[k]); lastOp = OPS[k]; }
+  if (f <= STITCH_END && last && f >= 4) needleAt(last[0], last[1], lastOp, f);
+  else restingNeedle();
+  light();
+}
+window.FRAMES = FRAMES; window.FPS = 12;
+window.renderFrame = async f => { drawFrame(f); return document.getElementById('c').toDataURL('image/png'); };
+drawFrame(Number(new URLSearchParams(location.search).get('f') || 119));
+window.__ready = true;
+</script></body></html>

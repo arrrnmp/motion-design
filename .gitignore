@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Render and scratch output from the bundled scripts
+out/
+renders/
+frames/
+*.mp4
+*.mov
+*.wav
+*.mp3
+
+# OS noise
+.DS_Store

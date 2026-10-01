@@ -1,0 +1,121 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=League+Gothic&family=Yellowtail&family=Libre+Caslon+Text:ital,wght@0,700;1,400&family=Courier+Prime:wght@700&display=block" rel="stylesheet">
+<style>html,body{margin:0;background:#e9dcc0}canvas{display:block}</style>
+<script src="../../lib/print.js"></script>
+</head><body><canvas id="c" width="1920" height="1080"></canvas>
+<script>
+/* SPACE AGE (v2) — not a vector wearing a retro costume but the artefact itself: a 1958 magazine ad,
+   letterpress-printed in four spot inks (black key, tomato, mustard, turquoise), each with its own
+   halftone angle, slightly out of register, on yellowed newsprint. Googie shapes (boomerangs,
+   Sputnik stars, orbits), a percolator-rocket, a cherry-planet with two bean moons, deadpan ad copy,
+   a starburst and a clip-and-mail coupon. Motion rule: limited animation, UPA-style — held poses,
+   things slide on straight paths, stars twinkle on twos, camera trucks slowly across the page. */
+window.__ready = false;
+const W = 1920, H = 1080;
+const K = makePlate(W, H), RED = makePlate(W, H), MUS = makePlate(W, H), TEAL = makePlate(W, H);
+const d = v => `rgba(0,0,0,${v})`;
+const poly = (g, pts) => { g.beginPath(); pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); };
+const star = (g, cx, cy, r1, r2, n, rot = 0) => { g.beginPath(); for (let i = 0; i < n * 2; i++) { const a = rot + i / (n * 2) * Math.PI * 2, r = i % 2 ? r2 : r1; i ? g.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r) : g.moveTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); } g.closePath(); };
+const sputnik = (g, cx, cy, r) => { star(g, cx, cy, r, r * 0.12, 4); g.fill(); star(g, cx, cy, r * 0.55, r * 0.1, 4, Math.PI / 4); g.fill(); };
+
+async function main() {
+  for (const f of ['60px "League Gothic"', '60px Yellowtail', 'italic 30px "Libre Caslon Text"', '700 30px "Libre Caslon Text"', '700 24px "Courier Prime"']) await document.fonts.load(f);
+
+  // ---------------- TEAL: sky field (tint), rocket body tint, orbit tint
+  TEAL.fillStyle = d(0.42); TEAL.fillRect(0, 0, W, 760);
+  TEAL.fillStyle = d(0.2); TEAL.fillRect(0, 760, W, 320);
+  // knock the headline panel and coupon out of the sky tint
+  TEAL.clearRect(70, 60, 830, 660); TEAL.clearRect(70, 744, 700, 300);
+  // ---------------- MUSTARD: boomerangs, ground band, stars
+  MUS.fillStyle = d(1);
+  const boomer = (g, x, y, s, r) => { g.save(); g.translate(x, y); g.rotate(r); g.scale(s, s); g.beginPath(); g.moveTo(-100, 20); g.bezierCurveTo(-40, -70, 60, -60, 110, 10); g.bezierCurveTo(60, -20, -20, -10, -70, 40); g.bezierCurveTo(-90, 55, -115, 40, -100, 20); g.fill(); g.restore(); };
+  boomer(MUS, 1030, 170, 1.4, -0.2); boomer(MUS, 1800, 520, 1.1, 2.6); boomer(MUS, 1240, 940, 1.6, 0.25);
+  MUS.fillStyle = d(0.55); MUS.fillRect(0, 900, W, 180); MUS.clearRect(70, 744, 700, 300);
+  MUS.fillStyle = d(1); [[1120, 360, 44], [1740, 150, 30], [960, 620, 26], [1830, 760, 22]].forEach(([x, y, r]) => sputnik(MUS, x, y, r));
+  // ---------------- cherry planet (RED solid + K halftone shading) with orbits
+  const CP = { x: 1520, y: 330, r: 150 };
+  RED.fillStyle = d(1); RED.beginPath(); RED.arc(CP.x, CP.y, CP.r, 0, 7); RED.fill();
+  const sh = K.createRadialGradient(CP.x - 60, CP.y - 60, 20, CP.x, CP.y, CP.r); sh.addColorStop(0, d(0)); sh.addColorStop(0.6, d(0.05)); sh.addColorStop(1, d(0.55));
+  K.fillStyle = sh; K.beginPath(); K.arc(CP.x, CP.y, CP.r, 0, 7); K.fill();
+  K.lineWidth = 6; K.strokeStyle = d(1); K.beginPath(); K.arc(CP.x, CP.y, CP.r, 0, 7); K.stroke();
+  K.lineWidth = 9; K.beginPath(); K.moveTo(CP.x + 10, CP.y - CP.r + 4); K.quadraticCurveTo(CP.x + 20, CP.y - CP.r - 60, CP.x + 70, CP.y - CP.r - 80); K.stroke();
+  MUS.beginPath(); MUS.moveTo(CP.x + 70, CP.y - CP.r - 80); MUS.bezierCurveTo(CP.x + 130, CP.y - CP.r - 140, CP.x + 210, CP.y - CP.r - 90, CP.x + 220, CP.y - CP.r - 60); MUS.bezierCurveTo(CP.x + 160, CP.y - CP.r - 40, CP.x + 110, CP.y - CP.r - 50, CP.x + 70, CP.y - CP.r - 80); MUS.fill();
+  // highlight knocked out of the red
+  RED.globalCompositeOperation = 'destination-out'; RED.beginPath(); RED.ellipse(CP.x - 70, CP.y - 76, 22, 11, -0.7, 0, 7); RED.fill(); RED.globalCompositeOperation = 'source-over';
+  // orbits (K dashed back half, K solid front half) + two bean moons
+  K.lineWidth = 4;
+  for (const rot of [-0.35, 0.5]) {
+    K.save(); K.translate(CP.x, CP.y); K.rotate(rot);
+    K.setLineDash([3, 16]); K.lineCap = 'round'; K.beginPath(); K.ellipse(0, 0, 330, 90, 0, Math.PI, 2 * Math.PI); K.stroke();
+    K.setLineDash([]); K.beginPath(); K.ellipse(0, 0, 330, 90, 0, 0, Math.PI); K.stroke(); K.restore();
+  }
+  const bean = (x, y, r) => {
+    for (const g of [RED, MUS]) { g.save(); g.translate(x, y); g.rotate(r); g.fillStyle = d(g === RED ? 0.55 : 0.9); g.beginPath(); g.ellipse(0, 0, 30, 44, 0, 0, 7); g.fill(); g.restore(); }
+    K.save(); K.translate(x, y); K.rotate(r); K.lineWidth = 5; K.beginPath(); K.ellipse(0, 0, 30, 44, 0, 0, 7); K.stroke();
+    K.beginPath(); K.moveTo(-2, -38); K.bezierCurveTo(16, -12, -16, 12, 2, 38); K.stroke(); K.restore();
+  };
+  const onOrbit = (rot, t) => [CP.x + Math.cos(rot) * 330 * Math.cos(t) - Math.sin(rot) * 90 * Math.sin(t), CP.y + Math.sin(rot) * 330 * Math.cos(t) + Math.cos(rot) * 90 * Math.sin(t)];
+  bean(...onOrbit(-0.35, 2.4), -0.9); bean(...onOrbit(0.5, 0.35), 0.6);
+
+  // ---------------- percolator rocket, launching up-left from lower right
+  K.save(); RED.save(); TEAL.save();
+  for (const g of [K, RED, TEAL]) { g.translate(1560, 740); g.rotate(-0.42); g.scale(0.82, 0.82); }
+  // body (teal solid-ish), nose (red), fins (red), glass knob (mustard)
+  TEAL.fillStyle = d(0.85); poly(TEAL, [[-70, -150], [70, -150], [90, 160], [-90, 160]]); TEAL.fill();
+  RED.fillStyle = d(1); RED.beginPath(); RED.moveTo(-70, -150); RED.quadraticCurveTo(0, -330, 70, -150); RED.closePath(); RED.fill();
+  poly(RED, [[-90, 90], [-170, 220], [-80, 190]]); RED.fill(); poly(RED, [[90, 90], [170, 220], [80, 190]]); RED.fill();
+  K.lineWidth = 7; K.strokeStyle = d(1); K.lineJoin = 'round';
+  poly(K, [[-70, -150], [70, -150], [90, 160], [-90, 160]]); K.stroke();
+  K.beginPath(); K.moveTo(-70, -150); K.quadraticCurveTo(0, -330, 70, -150); K.stroke();
+  poly(K, [[-90, 90], [-170, 220], [-80, 190]]); K.stroke(); poly(K, [[90, 90], [170, 220], [80, 190]]); K.stroke();
+  // percolator details: handle, spout, bands, porthole with a bean
+  K.lineWidth = 10; K.beginPath(); K.moveTo(80, -90); K.bezierCurveTo(170, -80, 170, 60, 86, 80); K.stroke();
+  K.lineWidth = 6; K.beginPath(); K.moveTo(-72, -110); K.lineTo(-130, -170); K.lineTo(-150, -160); K.stroke();
+  [-110, 120].forEach(y => { K.beginPath(); K.moveTo(-76, y); K.lineTo(76, y); K.stroke(); });
+  K.beginPath(); K.arc(0, 0, 44, 0, 7); K.stroke();
+  TEAL.globalCompositeOperation = 'destination-out'; TEAL.beginPath(); TEAL.arc(0, 0, 40, 0, 7); TEAL.fill(); TEAL.globalCompositeOperation = 'source-over';
+  RED.fillStyle = d(0.6); RED.beginPath(); RED.ellipse(0, 0, 16, 24, 0.4, 0, 7); RED.fill();
+  // exhaust: flame (red/mustard) and a trail of beans
+  RED.fillStyle = d(1); RED.beginPath(); RED.moveTo(-60, 160); RED.quadraticCurveTo(0, 360, 60, 160); RED.fill();
+  K.restore(); RED.restore(); TEAL.restore();
+  MUS.save(); MUS.translate(1560, 740); MUS.rotate(-0.42); MUS.scale(0.82, 0.82); MUS.fillStyle = d(1); MUS.beginPath(); MUS.moveTo(-34, 170); MUS.quadraticCurveTo(0, 290, 34, 170); MUS.fill(); MUS.restore();
+  // speed lines
+  K.lineWidth = 5; K.lineCap = 'round';
+
+  // ---------------- headline panel (paper), type
+  K.fillStyle = d(1); K.textBaseline = 'alphabetic';
+  K.font = '200px "League Gothic"'; K.fillText('FROM CHERRY', 100, 250);
+  RED.fillStyle = d(1); RED.font = '220px Yellowtail'; RED.save(); RED.translate(300, 420); RED.rotate(-0.08); RED.fillText('to Cup!', 0, 0); RED.restore();
+  K.save(); K.translate(306, 426); K.rotate(-0.08); K.lineWidth = 3; K.strokeStyle = d(1); K.font = '220px Yellowtail'; K.strokeText('to Cup!', 0, 0); K.restore();
+  K.font = 'italic 30px "Libre Caslon Text"';
+  ['Every coffee cherry holds two seeds. Our scientists', 'roast them a crisp brown and grind them fine —', 'so tomorrow’s espresso machine can brew your', 'cup at a thrilling 9 bar of pressure!'].forEach((l, i) => K.fillText(l, 104, 572 + i * 38));
+  K.lineWidth = 3; K.beginPath(); K.moveTo(100, 480); K.lineTo(880, 480); K.stroke(); K.beginPath(); K.moveTo(100, 489); K.lineTo(880, 489); K.stroke();
+  K.font = '700 22px "Libre Caslon Text"'; K.fillText('THE ATOMIC WAY TO YOUR MORNING', 104, 526);
+
+  // ---------------- starburst sticker
+  MUS.fillStyle = d(1); star(MUS, 1010, 520, 160, 124, 20, 0.1); MUS.fill();
+  K.lineWidth = 5; star(K, 1010, 520, 160, 124, 20, 0.1); K.stroke();
+  K.save(); K.translate(1010, 520); K.rotate(-0.14); K.textAlign = 'center';
+  K.font = '96px "League Gothic"'; K.fillText('2 SEEDS', 0, 14); K.font = '700 19px "Libre Caslon Text"'; K.fillText('IN EVERY CHERRY!', 0, 50); K.restore();
+  K.textAlign = 'left';
+
+  // ---------------- clip & mail coupon
+  K.setLineDash([16, 10]); K.lineWidth = 3; K.strokeRect(96, 760, 650, 270); K.setLineDash([]);
+  K.font = '700 24px "Courier Prime"'; K.textAlign = 'left';
+  ['CLIP & MAIL TODAY', '', 'Send us 2 seeds and we will', 'send you back 1 cup.*', '', 'NAME ______________________', 'CITY ____________ ZONE ___'].forEach((l, i) => K.fillText(l, 124, 804 + i * 30));
+  K.font = 'italic 18px "Libre Caslon Text"'; K.fillText('*Roasting, grinding and brewing not included.', 124, 1016);
+  // scissors mark
+  K.font = '30px serif'; K.fillText('✂', 70, 772);
+
+  // ---------------- print
+  printPlates(document.getElementById('c'), [
+    { ctx: MUS, rgb: [232, 179, 58], angle: 0, cell: 9, offset: [3, -2] },
+    { ctx: TEAL, rgb: [58, 160, 156], angle: 75, cell: 9, offset: [-4, 2] },
+    { ctx: RED, rgb: [214, 72, 44], angle: 15, cell: 9, offset: [5, 3] },
+    { ctx: K, rgb: [40, 36, 34], angle: 45, cell: 7, offset: [0, 0], speckle: 0.02 },
+  ], [236, 224, 196], { age: 1, seed: 58 });
+  window.__ready = true;
+}
+main();
+</script></body></html>

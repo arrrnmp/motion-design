@@ -1,0 +1,225 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>html,body{margin:0;background:#181425}canvas{display:block;image-rendering:pixelated;width:1920px;height:1080px}</style>
+<script src="../../lib/font5x7.js"></script>
+</head><body><canvas id="c" width="480" height="270"></canvas>
+<script>
+/* PIXEL DIORAMA — animated. 480x270 native, 12 fps, every change is whole pixels (no tweening):
+   - camera trucks right 1px every 5 frames; layers parallax at integer ratios (far 1/8 ... fore 1/1)
+   - the sun sinks 1px every 12 frames, re-grading sky + rims each step
+   - clouds drift, god rays turn a step at a time, roastery smoke loops, cherries glint on twos
+   - the picker walks a 4-frame cycle and stops three times to toss a cherry into the basket
+   window.renderFrame(f) draws frame f deterministically. */
+const W = 480, H = 270, FRAMES = 120;
+const PAL = ['#be4a2f','#d77643','#ead4aa','#e4a672','#b86f50','#733e39','#3e2731','#a22633','#e43b44','#f77622','#feae34','#fee761','#63c74d','#3e8948','#265c42','#193c3e','#124e89','#0099db','#2ce8f5','#ffffff','#c0cbdc','#8b9bb4','#5a6988','#3a4466','#262b44','#181425','#ff0044','#68386c','#b55088','#f6757a','#e8b796','#c28569'];
+const C = {}; ['rust','ochre','cream','tan','clay','brown','umber','wine','red','orange','amber','yellow','lime','green','pine','deep','navy','blue','cyan','white','mist','slate','steel','dusk','night','ink','hot','plum','mauve','rose','blush','sand'].forEach((n, i) => C[n] = i);
+const buf = new Uint8Array(W * H);
+const set = (x, y, c) => { x = Math.round(x); y = Math.round(y); if (x >= 0 && y >= 0 && x < W && y < H) buf[y * W + x] = c; };
+const get = (x, y) => buf[(y | 0) * W + (x | 0)];
+const B4 = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
+const dith = (x, y, t) => t * 16 > B4[((Math.floor(y) % 4) + 4) % 4][((Math.floor(x) % 4) + 4) % 4] + 0.5;
+let sd = 3; const rnd0 = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
+const P = new Float32Array(512); for (let i = 0; i < 512; i++) P[i] = rnd0();
+const h2 = (x, y) => P[((x * 73 + y * 151) % 512 + 512) % 512];
+function vn(x, y) { const X = Math.floor(x), Y = Math.floor(y), fx = x - X, fy = y - Y, s = t => t * t * (3 - 2 * t);
+  const a = h2(X, Y), b = h2(X + 1, Y), c = h2(X, Y + 1), d = h2(X + 1, Y + 1);
+  return a + (b - a) * s(fx) + (c - a) * s(fy) + (a - b - c + d) * s(fx) * s(fy); }
+const fbm = (x, y) => vn(x, y) * .5 + vn(x * 2, y * 2) * .25 + vn(x * 4, y * 4) * .125 + vn(x * 8, y * 8) * .0625;
+const ramp = (x, y, steps, t) => { t = Math.max(0, Math.min(0.9999, t)) * (steps.length - 1); const i = Math.floor(t); return dith(x, y, t - i) ? steps[Math.min(i + 1, steps.length - 1)] : steps[i]; };
+function rect(x, y, w, h, c) { for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) set(x + i, y + j, c); }
+const FIREFLIES = Array.from({ length: 40 }, () => [180 + rnd0() * 290, 150 + rnd0() * 110, rnd0() > 0.5 ? C.yellow : C.amber]);
+
+// picker schedule: pauses (pick) at these frames for 10 frames each
+const PICKS = [28, 62, 96], PICK_LEN = 10;
+function pickerState(f) {
+  let walked = 0, picking = -1, picksDone = 0;
+  for (let i = 0; i < f; i++) { const p = PICKS.findIndex(s => i >= s && i < s + PICK_LEN); if (p < 0) walked++; }
+  PICKS.forEach((s, k) => { if (f >= s && f < s + PICK_LEN) picking = f - s; if (f >= s + 7) picksDone = k + 1; });
+  return { walked, picking, picksDone };
+}
+
+function drawFrame(f) {
+  const cam = Math.floor(f / 5);                                      // camera x in fore-layer pixels
+  const par = k => Math.floor(cam * k);
+  const SUN = { x: 352 - par(0.125), y: 128 + Math.floor(f / 12) };
+  buf.fill(C.night);
+
+  // ---- sky + clouds + sun
+  const SKY = [C.night, C.dusk, C.plum, C.mauve, C.rose, C.blush, C.amber, C.yellow];
+  for (let y = 0; y < 175; y++) for (let x = 0; x < W; x++) {
+    const d = Math.hypot((x - SUN.x) * 0.6, y - SUN.y);
+    set(x, y, ramp(x, y, SKY, y / 160 * 0.72 + Math.max(0, 1 - d / 190) * 0.32));
+  }
+  const cdrift = Math.floor(f / 3) + par(0.1);
+  for (let y = 18; y < 118; y++) for (let x = 0; x < W; x++) {
+    const wx = x + cdrift, band = Math.exp(-Math.pow((y - 62) / 34, 2));
+    const d = fbm(wx / 46, y / 9) * band - 0.26;
+    if (d <= 0) continue;
+    const lit = fbm((wx - 3) / 46, (y - 3) / 9) * band - 0.26 < d ? 1 : 0;
+    const near = Math.max(0, 1 - Math.hypot(x - SUN.x, y - SUN.y) / 200);
+    set(x, y, ramp(x, y, [C.plum, C.mauve, C.rose, C.blush, C.yellow], 0.15 + lit * 0.35 + near * 0.55 - (d > 0.12 ? 0.12 : 0)));
+  }
+  for (let y = -22; y <= 22; y++) for (let x = -22; x <= 22; x++) { const r = Math.hypot(x, y); if (r < 18) set(SUN.x + x, SUN.y + y, r < 14 ? C.white : C.yellow); }
+  const UP = { [C.night]: C.dusk, [C.dusk]: C.plum, [C.plum]: C.mauve, [C.mauve]: C.rose, [C.rose]: C.blush, [C.pine]: C.green, [C.deep]: C.pine };
+  const rayPhase = 0.7 + Math.floor(f / 4) * 0.035;
+  const rays = yMax => { for (let y = 0; y < yMax; y++) for (let x = 0; x < W; x++) {
+    if (Math.sin(Math.atan2(y - SUN.y, x - SUN.x) * 11 + rayPhase) < 0.55 || (x + y * 3) % 5) continue;
+    const up = UP[get(x, y)]; if (up !== undefined) set(x, y, up); } };
+
+  // ---- ranges (parallax), rim-lit toward the sun
+  function range(base, amp, sc, seed, fill, rim, hazeTop, off) {
+    const top = new Int16Array(W);
+    for (let x = 0; x < W; x++) { const wx = x + off; top[x] = Math.round(base - amp * fbm(wx / sc + seed, seed * 3.1) - amp * 0.35 * Math.abs(Math.sin(wx / (sc * 0.7) + seed))); }
+    for (let x = 0; x < W; x++) for (let y = top[x]; y < H; y++) {
+      let c = fill;
+      if (hazeTop && y < top[x] + 6 && dith(x, y, 1 - (y - top[x]) / 6)) c = hazeTop;
+      const slope = top[Math.min(W - 1, x + 1)] - top[Math.max(0, x - 1)];
+      if (y <= top[x] + ((x < SUN.x ? slope > 0 : slope < 0) ? 1 : 0) && Math.abs(x - SUN.x) < 220) c = rim;
+      set(x, y, c);
+    }
+  }
+  range(150, 44, 60, 1.3, C.mauve, C.blush, C.rose, par(0.125));
+  range(162, 34, 44, 4.1, C.plum, C.rose, null, par(0.25));
+  rays(175);
+  range(176, 22, 36, 7.7, C.dusk, C.mauve, null, par(0.375));
+
+  // ---- terraced hill (parallax 1/2)
+  const offH = par(0.5);
+  const hillW = wx => Math.round(150 + 40 * Math.pow(Math.max(0, wx) / W, 1.4) + 10 * fbm(wx / 40, 9) - 18 * Math.exp(-Math.pow((wx - 150) / 110, 2)));
+  const hillTop = new Int16Array(W); for (let x = 0; x < W; x++) hillTop[x] = hillW(x + offH);
+  for (let x = 0; x < W; x++) for (let y = hillTop[x]; y < H; y++) {
+    const wx = x + offH;
+    set(x, y, ramp(wx, y, [C.deep, C.pine, C.green], (wx / W) * 0.6 + 0.2 - (y - hillTop[x]) / 200));
+    if (y <= hillTop[x] + 1) set(x, y, wx > 200 ? C.amber : C.lime);
+    else if (y <= hillTop[x] + 3 && wx > 230 && dith(wx, y, 0.5)) set(x, y, C.ochre);
+  }
+  for (let row = 0; row < 7; row++) {
+    const o = 8 + row * 11 + row * row * 0.6, step = 7 + (row > 3 ? 1 : 0);
+    for (let wx = 4; wx < W + offH + 8; wx += step) {
+      const x = wx - offH; if (x < -8 || x > W + 8) continue;
+      const y = hillW(wx) + o + Math.round(1.5 * Math.sin(wx / 23 + row));
+      if (y > 238) continue;
+      const s = 2 + (row > 2 ? 1 : 0) + (row > 5 ? 1 : 0);
+      for (let dy = -s; dy <= 1; dy++) for (let dx = -s - 1; dx <= s + 1; dx++) {
+        if ((dx * dx) / ((s + 1.2) ** 2) + (dy * dy) / (s * s) > 1) continue;
+        set(x + dx, y + dy, dx > 0 && dy < 0 ? (wx > 220 && dy === -s ? C.amber : C.lime) : dy > 0 ? C.deep : C.green);
+      }
+      set(x - s - 2, y + 1, C.deep); set(x - s - 3, y + 1, C.deep);
+      if (h2(wx, row) > 0.3) set(x - 1 + (h2(row, wx) * 3 | 0), y - 1 + (h2(wx, wx) * 2 | 0), C.red);
+      if (h2(wx + 5, row) > 0.7) set(x + 1, y, C.red);
+    }
+  }
+  // path
+  for (let t = 0; t <= 1; t += 0.004) {
+    const wx = 330 + 70 * t + 26 * Math.sin(t * 9), y = Math.round(269 - (269 - (hillW(405) + 29)) * t), x = Math.round(wx - offH);
+    const w = 1 + Math.round((y - 170) / 40);
+    for (let k = -w - 1; k <= w + 1; k++) set(x + k, y, Math.abs(k) > w ? C.clay : dith(x + k + offH, y, 0.3) ? C.sand : C.tan);
+  }
+  function shadeTree(wx, h, rx) {
+    const x = wx - offH, base = hillW(wx) + 6 + Math.round(h / 3), topY = base - h, sgn = Math.sign(SUN.x - x);
+    for (let y = topY; y <= base; y++) { set(x, y, C.ink); set(x + 1, y, y < base - 4 ? C.umber : C.ink); }
+    for (let y = -rx / 2.4; y <= rx / 3; y++) for (let dx = -rx; dx <= rx; dx++) {
+      const e = (dx * dx) / (rx * rx) + (y * y) / ((rx / 2.4) ** 2) + 0.25 * fbm((wx + dx) / 4, (topY + y) / 3);
+      if (e > 1.15) continue;
+      const tw = sgn * dx > 0;
+      set(x + dx, topY + y, e > 0.8 && tw && y < 1 ? C.orange : e > 0.95 && tw ? C.amber : dith(wx + dx, topY + y, 0.3) ? C.deep : C.ink);
+    }
+    for (let i = 0; i < rx + 8; i++) { const sx = x - sgn * i; if (dith(sx + offH, base + 1, 0.8)) set(sx, base + 1, C.deep); }
+  }
+  shadeTree(214, 26, 18); shadeTree(318, 34, 22); shadeTree(452, 30, 20); shadeTree(186, 20, 13);
+
+  // roastery + looping smoke
+  const RX = 392 - offH, RY = hillW(392) + 6;
+  rect(RX - 1, RY - 1, 34, 24, C.ink); rect(RX, RY, 32, 22, C.clay); rect(RX, RY, 6, 22, C.brown);
+  for (let j = 0; j < 22; j += 4) for (let i = 7; i < 32; i += 7) rect(RX + i + (j % 8 ? 3 : 0), RY + j + 2, 1, 1, C.brown);
+  for (let i = 0; i < 20; i++) rect(RX - 3 + i, RY - 1 - Math.floor(i / 1.5), 40 - 2 * i, 1, i % 3 ? C.wine : C.rust);
+  rect(RX + 22, RY - 20, 5, 12, C.umber); rect(RX + 22, RY - 21, 5, 1, C.ink);
+  const winOn = f % 24 < 22 || f < 60;                                    // a window flickers once in a while
+  [[RX + 9, RY + 6], [RX + 20, RY + 6]].forEach(([x, y], i) => { rect(x - 1, y - 1, 6, 7, C.ink); rect(x, y, 4, 5, i || winOn ? C.amber : C.orange); rect(x, y, 4, 1, C.yellow); set(x + 1, y + 2, C.orange); });
+  rect(RX + 12, RY + 13, 7, 9, C.ink); rect(RX + 13, RY + 14, 5, 8, C.umber); set(RX + 17, RY + 18, C.amber);
+  const sp = Math.floor(f / 2);
+  for (let k0 = 0; k0 < 20; k0++) {
+    const k = (k0 + sp) % 20;
+    const px = RX + 24 + Math.round(Math.sin(k * 0.5) * 3) - k * 1.4, py = RY - 22 - k * 2.2, r = 2 + k / 6;
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (dx * dx + dy * dy <= r * r && dith(Math.round(px + dx), Math.round(py + dy), 0.8 - k / 26)) set(px + dx, py + dy, dx > 0 ? C.blush : C.rose);
+  }
+  for (let y = RY + 22; y < RY + 34; y++) for (let x = RX - 10; x < RX + 44; x++) if (dith(x + offH, y, 0.22 - (y - RY - 22) / 50)) set(x, y, C.ochre);
+
+  // ---- picker (hill layer): 4-frame walk, stops to pick
+  const st = pickerState(f);
+  const PWX = 232 + Math.floor(st.walked / 2), PX = PWX - offH, PY = hillW(PWX) + 34;
+  const top = ['....1111....', '...122221...', '..12222221..', '...133331...', '...1333331..', '....1331....', '...144441...', '..14444441..',
+    '..14144414..', '..1314413...', '...144441...', '...155551...'];
+  const LEGS = [['...15..51...', '...15..51...', '...11..11...'], ['...15..51...', '..15....51..', '..11....11..'],
+                ['...15..51...', '...15..51...', '...11..11...'], ['....1551....', '....1551....', '....1111....']];
+  const legs = st.picking >= 0 ? LEGS[0] : LEGS[Math.floor(st.walked / 2) % 4];
+  const bob = st.picking < 0 && Math.floor(st.walked / 2) % 2 ? 1 : 0;
+  const pc = { 1: C.ink, 2: C.sand, 3: C.tan, 4: C.navy, 5: C.umber };
+  for (let i = 0; i < 26; i++) set(PX + 2 - i, PY + 15, C.deep);
+  top.forEach((row, y) => [...row].forEach((ch, x) => { if (pc[ch] !== undefined) set(PX + x, PY + y + bob, pc[ch]); }));
+  legs.forEach((row, y) => [...row].forEach((ch, x) => { if (pc[ch] !== undefined) set(PX + x, PY + 12 + y, pc[ch]); }));
+  for (let y = 6; y < 12; y++) { const i = top[y].lastIndexOf('4'); if (i > 0) set(PX + i, PY + y + bob, C.blue); }
+  for (let x = -1; x < 13; x++) set(PX + x, PY + bob + (x > 3 && x < 8 ? -1 : 0), C.sand);
+  // basket with a growing heap
+  rect(PX + 10, PY + 7, 7, 5, C.ink); rect(PX + 11, PY + 8, 5, 3, C.clay);
+  [[11, 6], [13, 5], [15, 6], [12, 5], [14, 4], [16, 5]].slice(0, 3 + st.picksDone).forEach(([dx, dy]) => set(PX + dx, PY + dy, C.red));
+  if (st.picking >= 0) {
+    const p = st.picking;
+    if (p < 4) for (let k = 0; k < 4; k++) set(PX + 9 + (k > 1 ? 1 : 0), PY + 7 - k - (p > 1 ? 1 : 0), C.tan);          // arm reaches up
+    const arc = [[10, -4], [12, -6], [14, -6], [15, -4], [15, -1], [14, 3]];
+    if (p >= 1 && p < 7) set(PX + arc[p - 1][0], PY + arc[p - 1][1], C.red);                                           // cherry tossed on an arc
+    if (p >= 6 && p < 9) { set(PX + 13, PY + 1, C.white); set(PX + 17, PY + 2, C.white); set(PX + 15, PY - 1, C.yellow); }  // plink
+  }
+
+  // ---- fireflies (fore-mid): drift on a slow sine, blink
+  FIREFLIES.forEach(([x, y, c], i) => { if (h2(i, Math.floor(f / 3)) > 0.35) set(x - par(0.75) + Math.round(Math.sin((f + i * 7) / 9) * 2), y + Math.round(Math.cos((f + i * 5) / 11) * 2), c); });
+
+  // ---- foreground branch (1/1), leaves sway in steps, cherries glint on twos
+  const offF = cam;
+  function blob(cx, cy, rx, ry, rot, body, rim, dark) {
+    const c = Math.cos(rot), s = Math.sin(rot);
+    for (let y = -ry - 2; y <= ry + 2; y++) for (let x = -rx - 2; x <= rx + 2; x++) {
+      const u = (x * c + y * s) / rx, v = (-x * s + y * c) / ry, d = u * u + v * v;
+      if (d > 1) continue;
+      const X = cx + x, Y = cy + y;
+      const toward = ((SUN.x - X) * x + (SUN.y - Y) * y) / (Math.hypot(SUN.x - X, SUN.y - Y) * Math.hypot(x, y) + 1e-6);
+      set(X, Y, d > 0.72 && toward > 0.35 ? rim : (d < 0.3 && dark !== undefined && dith(X, Y, 0.5) ? dark : body));
+    }
+  }
+  for (let t = 0; t <= 1; t += 0.002) { const x = -10 + 190 * t - offF, y = 290 - 170 * t + 40 * Math.sin(t * 3); for (let k = -2; k <= 2; k++) set(x, y + k, k === -2 ? C.orange : C.ink); }
+  const LEAVES = [[40, 214, 26, 9, -0.9], [70, 172, 30, 10, -1.25], [96, 208, 28, 9, 0.35], [124, 160, 26, 9, -0.6], [150, 186, 30, 9, 0.7], [20, 250, 30, 10, -0.3], [170, 138, 22, 8, -1.1], [110, 236, 24, 8, 0.9]];
+  LEAVES.forEach(([x, y, rx, ry, r], i) => {
+    const sway = 0.07 * Math.round(Math.sin(f / 12 * Math.PI * 0.8 + i * 1.3) * 2) / 2;   // 5 discrete poses
+    const R = r + sway, ox = Math.round(Math.cos(R) * 3 - Math.cos(r) * 3);
+    blob(x - offF + ox, y, rx, ry, R, C.deep, C.orange, C.ink);
+    for (let t = -0.85; t <= 0.85; t += 0.02) set(x - offF + ox + Math.cos(R) * rx * t, y + Math.sin(R) * rx * t, C.pine);
+  });
+  const CHERRIES = [[62, 196], [70, 200], [66, 206], [58, 204], [112, 184], [120, 188], [116, 194], [138, 170], [144, 176], [30, 238], [37, 242], [158, 158], [164, 162]];
+  CHERRIES.forEach(([x, y]) => blob(x - offF, y, 5, 5, 0, C.wine, C.hot, C.umber));
+  CHERRIES.forEach(([x, y], i) => { set(x - offF + 2, y - 2, C.rose); if (h2(i * 3, Math.floor(f / 2)) > 0.72) { set(x - offF + 3, y - 2, C.white); set(x - offF + 3, y - 3, C.white); set(x - offF + 4, y - 2, C.white); } });
+
+  // ---- title (HUD, fixed) with a glint sweeping across every 3 s
+  const sweep = (f % 36) * 12 - 40;
+  function glyphs(str, x, y, s, colorAt, outline, shadow) {
+    const cells = [];
+    [...str].forEach((ch, i) => { const g = FONT5x7[ch] || FONT5x7[' ']; for (let r = 0; r < 7; r++) for (let q = 0; q < 5; q++) if (g[r * 5 + q] === '#') for (let a = 0; a < s; a++) for (let b = 0; b < s; b++) cells.push([x + i * 6 * s + q * s + b, y + r * s + a, r * s + a]); });
+    if (shadow !== undefined) cells.forEach(([cx, cy]) => { set(cx + 2, cy + 3, shadow); set(cx + 1, cy + 3, shadow); });
+    if (outline !== undefined) cells.forEach(([cx, cy]) => { for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) set(cx + dx, cy + dy, outline); });
+    cells.forEach(([cx, cy, row]) => set(cx, cy, colorAt(row, cx, cy)));
+  }
+  const BANDS = [C.white, C.yellow, C.yellow, C.amber, C.amber, C.orange, C.orange, C.rust, C.wine];
+  const band = (r, cx, cy) => { const d = cx + (cy - 14) * 0.5 - sweep; return d >= 0 && d < 5 ? C.white : BANDS[Math.floor(r / 21 * BANDS.length)]; };
+  glyphs('FROM CHERRY', 16, 14, 3, band, C.ink, C.night);
+  glyphs('TO CUP', 16, 42, 3, band, C.ink, C.night);
+  glyphs('EVERY CHERRY HIDES TWO SEEDS', 18, 72, 1, () => C.blush, C.ink);
+
+  const out = document.getElementById('c').getContext('2d'), img = out.createImageData(W, H);
+  const rgb = PAL.map(hx => [1, 3, 5].map(i => parseInt(hx.slice(i, i + 2), 16)));
+  for (let i = 0; i < W * H; i++) { const c = rgb[buf[i]]; img.data[i * 4] = c[0]; img.data[i * 4 + 1] = c[1]; img.data[i * 4 + 2] = c[2]; img.data[i * 4 + 3] = 255; }
+  out.putImageData(img, 0, 0);
+}
+window.FRAMES = FRAMES; window.FPS = 12;
+window.renderFrame = async f => { drawFrame(f); return document.getElementById('c').toDataURL('image/png'); };
+drawFrame(Number(new URLSearchParams(location.search).get('f') || 0));
+window.__ready = true;
+</script></body></html>

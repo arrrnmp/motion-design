@@ -1,0 +1,127 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@96,800&family=Bricolage+Grotesque:opsz,wght@12,500&display=block" rel="stylesheet">
+<style>html,body{margin:0;background:#e9e2d4}canvas{display:block}</style>
+</head><body><canvas id="c" width="1920" height="1080"></canvas>
+<script>
+/* STAINED GLASS (digital cathedral, v3) — daylight on pale stone. A gothic lancet glazed with small
+   Richter squares whose colours run a Sagrada-style gradient top to bottom (sky, leaf, cherry, ember,
+   roast, crema). The glass layer is the single source of truth: the coloured light on the floor is
+   that exact layer projected in perspective, so every bar and edge in the window reappears in the
+   cast. Flat stone shapes, paper grain, one title, one line.
+   Motion rule: squares flicker as clouds pass; the cast slides slowly as the sun moves. */
+window.__ready = false;
+const W = 1920, H = 1080, cv = document.getElementById('c'), g = cv.getContext('2d');
+let sd = 17; const rnd = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
+const layer = () => { const c = document.createElement('canvas'); c.width = W; c.height = H; return [c, c.getContext('2d')]; };
+const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const css = c => `rgb(${c.map(v => Math.round(v))})`;
+const lerp = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
+
+// ---------------------------------------------------------------- the story gradient + fixed palette
+const STOPS = [[0, '#1b45c9'], [0.16, '#2b9ad0'], [0.32, '#2f9e58'], [0.5, '#d9232c'], [0.64, '#ff5c1a'], [0.8, '#8a4219'], [1, '#f0b53a']].map(([t, h]) => [t, hex(h)]);
+const grad = t => { t = Math.max(0, Math.min(1, t)); for (let i = 1; i < STOPS.length; i++) if (t <= STOPS[i][0]) { const [t0, c0] = STOPS[i - 1], [t1, c1] = STOPS[i]; return lerp(c0, c1, (t - t0) / (t1 - t0)); } return STOPS.at(-1)[1]; };
+const PALETTE = [];
+for (let i = 0; i < 36; i++) { const c = grad(i / 35); PALETTE.push(c, c.map(v => Math.min(255, v * 1.25 + 14)), c.map(v => v * 0.7)); }
+PALETTE.push([240, 242, 244], [214, 228, 238], [250, 232, 200]);
+const nearest = c => { let best, bd = 1e9; for (const p of PALETTE) { const d = (p[0] - c[0]) ** 2 + (p[1] - c[1]) ** 2 + (p[2] - c[2]) ** 2; if (d < bd) { bd = d; best = p; } } return best; };
+
+// ---------------------------------------------------------------- window geometry
+const WIN = { l: 190, r: 610, top: 90, spring: 410, bot: 760 };
+function archPoly(l, r, spring, bot, steps = 60) {
+  const w = r - l, rad = w * 0.8, pts = [[l, bot], [l, spring]];
+  const a0 = Math.PI, a1 = Math.PI + Math.acos(1 - w / 2 / rad);
+  for (let k = 1; k <= steps; k++) { const a = a0 + (a1 - a0) * k / steps; pts.push([l + rad + Math.cos(a) * rad, spring + Math.sin(a) * rad]); }
+  for (let k = steps; k >= 0; k--) { const a = a0 + (a1 - a0) * k / steps; pts.push([r - rad - Math.cos(a) * rad, spring + Math.sin(a) * rad]); }
+  pts.push([r, bot]);
+  return { pts, apexY: spring - Math.sqrt(rad * rad - (rad - w / 2) ** 2) };
+}
+const path = (ctx, pts) => { ctx.beginPath(); pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.closePath(); };
+const outer = archPoly(WIN.l, WIN.r, WIN.spring, WIN.bot);
+const lightL = archPoly(WIN.l + 22, (WIN.l + WIN.r) / 2 - 8, WIN.spring + 210, WIN.bot - 18);
+const lightR = archPoly((WIN.l + WIN.r) / 2 + 8, WIN.r - 22, WIN.spring + 210, WIN.bot - 18);
+const OC = { x: (WIN.l + WIN.r) / 2, y: WIN.spring - 40, r: 80 };
+function tracery(ctx) {                             // stone bars: drawn identically in the glass mask and on the wall
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.lineWidth = 12; path(ctx, lightL.pts); ctx.stroke(); path(ctx, lightR.pts); ctx.stroke();
+  ctx.beginPath(); ctx.arc(OC.x, OC.y, OC.r, 0, 7); ctx.stroke();
+  ctx.lineWidth = 10; ctx.beginPath(); ctx.moveTo(OC.x, OC.y + OC.r); ctx.lineTo(OC.x, lightL.apexY + 4); ctx.stroke();
+  ctx.lineWidth = 6; for (const y of [WIN.bot - 150, WIN.bot - 310]) { ctx.beginPath(); ctx.moveTo(WIN.l, y); ctx.lineTo(WIN.r, y); ctx.stroke(); }
+  ctx.lineWidth = 18; path(ctx, outer.pts); ctx.stroke();
+}
+
+// ---------------------------------------------------------------- glass layer (the source of truth)
+const Q = 14, GAP = 2;
+const [gc, gg] = layer();
+for (let y = WIN.top - Q; y < WIN.bot + Q; y += Q) for (let x = WIN.l - Q; x < WIN.r + Q; x += Q) {
+  const cx = x + Q / 2, cy = y + Q / 2, dOc = Math.hypot(cx - OC.x, cy - OC.y);
+  let t = (cy - WIN.top - 50) / (WIN.bot - WIN.top - 50);
+  if (dOc < OC.r) t = 0.5 - 0.12 * (1 - dOc / OC.r);
+  t += (rnd() - 0.5) * 0.22 + 0.06 * Math.sin(cx / 37 + cy / 53);
+  let c = nearest(grad(t).map(v => v * (0.85 + rnd() * 0.3)));
+  if (rnd() < 0.03) c = PALETTE[PALETTE.length - 1 - (rnd() * 3 | 0)];
+  gg.fillStyle = css(c); gg.fillRect(x + GAP / 2, y + GAP / 2, Q - GAP, Q - GAP);
+}
+gg.globalCompositeOperation = 'destination-in'; gg.fillStyle = '#000'; path(gg, outer.pts); gg.fill();
+gg.globalCompositeOperation = 'destination-out'; gg.strokeStyle = '#000'; tracery(gg);
+gg.globalCompositeOperation = 'source-over';
+
+// ---------------------------------------------------------------- stone
+const STONE = '#ddd5c6', STONE_DK = '#c8bfae', STONE_DKR = '#b4aa98', FLOOR = '#cfc6b5', INK = '#231d18';
+g.fillStyle = '#e9e2d4'; g.fillRect(0, 0, W, H);
+const HORIZON = 790;
+g.fillStyle = FLOOR; g.fillRect(0, HORIZON, W, H - HORIZON);
+const VP = { x: 1300, y: 560 };
+g.strokeStyle = 'rgba(35,29,24,.08)'; g.lineWidth = 1.5;
+for (let k = -14; k <= 22; k++) { const xb = VP.x + k * 240; g.beginPath(); g.moveTo(VP.x + (xb - VP.x) * ((HORIZON - VP.y) / (H - VP.y)), HORIZON); g.lineTo(xb, H); g.stroke(); }
+for (let k = 1; k < 8; k++) { const y = HORIZON + (H - HORIZON) * Math.pow(k / 7, 1.7); g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); }
+g.fillStyle = STONE; g.fillRect(0, 0, 820, HORIZON);
+const rev = archPoly(WIN.l - 34, WIN.r + 34, WIN.spring, WIN.bot + 30);
+g.fillStyle = STONE_DK; path(g, rev.pts); g.fill();
+g.fillStyle = STONE_DKR; g.fillRect(WIN.l - 54, WIN.bot + 26, WIN.r - WIN.l + 108, 22);
+g.fillStyle = STONE_DK; g.fillRect(WIN.l - 54, WIN.bot + 20, WIN.r - WIN.l + 108, 8);
+g.fillStyle = STONE_DK; g.fillRect(0, HORIZON - 10, 820, 10);
+function column(x, top, bot, w) {
+  g.fillStyle = STONE_DK; g.fillRect(x - w, top, w * 2, bot - top);
+  g.fillStyle = STONE_DKR; g.fillRect(x + w * 0.35, top, w * 0.65, bot - top);
+  g.fillStyle = STONE; g.fillRect(x - w * 1.5, top - w * 0.8, w * 3, w * 0.8); g.fillRect(x - w * 1.4, bot - w * 0.6, w * 2.8, w * 0.6);
+}
+column(900, 120, HORIZON, 34);
+
+// ---------------------------------------------------------------- the cast: the glass layer, projected slice by slice
+const [cc, cx2] = layer();
+const CAST = { y0: HORIZON + 4, y1: H + 70, shear: 380 };
+const gh = WIN.bot - WIN.top + 40;
+for (let y = CAST.y0; y < CAST.y1; y++) {
+  const u = (y - CAST.y0) / (CAST.y1 - CAST.y0);
+  const sy = WIN.bot - u * gh, sc = 1 + u * 0.9, x0 = WIN.l + 60 + u * CAST.shear - (sc - 1) * (WIN.r - WIN.l) * 0.2;
+  cx2.drawImage(gc, WIN.l - 20, sy, WIN.r - WIN.l + 40, 1, x0 - 20 * sc, y, (WIN.r - WIN.l + 40) * sc, 1.2);
+}
+const soft = (src, px) => { const [c, x] = layer(); x.filter = `blur(${px}px)`; x.drawImage(src, 0, 0); return c; };
+const [lm, lmx] = layer(); lmx.drawImage(cc, 0, 0); lmx.globalCompositeOperation = 'source-in'; lmx.fillStyle = '#fbf7ee'; lmx.fillRect(0, 0, W, H);
+g.drawImage(soft(lm, 1.2), 0, 0);
+g.save(); g.globalCompositeOperation = 'multiply'; g.globalAlpha = 0.78; g.drawImage(soft(cc, 1.2), 0, 0); g.restore();
+
+// the window: pale backing (daylight), glass, stone tracery
+g.fillStyle = '#f7f3ea'; path(g, outer.pts); g.fill();
+g.drawImage(gc, 0, 0);
+g.strokeStyle = STONE_DK; tracery(g);
+
+// ---------------------------------------------------------------- paper grain
+const gr = g.getImageData(0, 0, W, H), d = gr.data;
+for (let i = 0; i < d.length; i += 4) { const n = (rnd() - 0.5) * 14; d[i] += n; d[i + 1] += n; d[i + 2] += n; }
+g.putImageData(gr, 0, 0);
+
+// ---------------------------------------------------------------- type: one title, one line
+(async () => {
+  await document.fonts.load('800 100px "Bricolage Grotesque"'); await document.fonts.load('500 36px "Bricolage Grotesque"');
+  const X = 1060; g.textBaseline = 'alphabetic';
+  g.font = '800 150px "Bricolage Grotesque"';
+  g.fillStyle = INK; g.fillText('From', X, 330);
+  g.fillStyle = '#c8232b'; g.fillText('cherry', X, 470);
+  g.fillStyle = INK; g.fillText('to cup.', X, 610);
+  g.fillStyle = 'rgba(35,29,24,.8)'; g.font = '500 38px "Bricolage Grotesque"';
+  g.fillText('Every cherry holds two seeds.', X + 6, 700);
+  window.__ready = true;
+})();
+</script></body></html>

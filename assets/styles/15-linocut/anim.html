@@ -1,0 +1,182 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&display=block" rel="stylesheet">
+<style>html,body{margin:0;background:#f2ede3}canvas{display:block}</style>
+</head><body><canvas id="c" width="1920" height="1080"></canvas>
+<script>
+/* LINOCUT — animated at 12 fps (stop-motion print cadence). Three acts, 10 s:
+   1. CARVE (0–4 s): the key block starts solid; gouges are cut in drafting order — title, sun,
+      rays, ground, outline halos, leaves' veins, cherries, cup, steam. Each frame shows the proof.
+   2. STAMP (4–4.6 s): the red block lands out of register with an impact shake, then settles.
+   3. LIVING PRINT (4.6–10 s): every 2 frames is a fresh impression (ink speckle + register jitter
+      re-roll), the rays turn a notch at a time, steam gouges rise, and a cherry drops from the
+      branch into the cup with a red splash.
+   window.renderFrame(f) draws frame f deterministically. */
+const W = 1920, H = 1080, FRAMES = 120, FPS = 12;
+const T_CARVE = 48, T_STAMP = 48, T_LIVE = 56;
+const lcg = s => () => ((s = (s * 16807) % 2147483647) / 2147483647);
+const P = (() => { const r = lcg(31); return Array.from({ length: 512 }, r); })();
+function vn(x, y) { const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, s = t => t * t * (3 - 2 * t);
+  const h = (a, b) => P[(((a * 57 + b * 131) % 512) + 512) % 512];
+  const a = h(xi, yi), b = h(xi + 1, yi), c = h(xi, yi + 1), d = h(xi + 1, yi + 1);
+  return a + (b - a) * s(xf) + (c - a) * s(yf) + (a - b - c + d) * s(xf) * s(yf); }
+const layer = () => { const c = document.createElement('canvas'); c.width = W; c.height = H; return c.getContext('2d', { willReadFrequently: true }); };
+const SUN = [1440, 360];
+const CHERRIES = [[330, 700, 44], [398, 716, 40], [352, 772, 42], [600, 590, 40], [622, 660, 38], [150, 890, 40], [214, 906, 36]];
+const DROP = { from: [660, 608], to: [1450, 612], r: 42, f0: 70, f1: 84 };     // the cherry that falls into the cup
+const ease = t => t < 0 ? 0 : t > 1 ? 1 : t * t * (3 - 2 * t);
+
+// ---- geometry shared by both blocks, fixed random (so re-impressions carve the same block)
+const G = (() => {
+  const r = lcg(77), g = { edge: [], rays: [], ground: [] };
+  for (let x = 70; x <= 1850; x += 30) g.edge.push([x, 66 + (r() - .5) * 6]);
+  for (let y = 66; y <= 1014; y += 30) g.edge.push([1850 + (r() - .5) * 6, y]);
+  for (let x = 1850; x >= 70; x -= 30) g.edge.push([x, 1014 + (r() - .5) * 6]);
+  for (let y = 1014; y >= 66; y -= 30) g.edge.push([70 + (r() - .5) * 6, y]);
+  for (let i = 0; i < 36; i++) g.rays.push({ a: i / 36 * Math.PI * 2 + 0.05, w: 26 + r() * 10, bow: (r() - .5) * 30 });
+  for (let y = 860; y < 1010; y += 17) for (let x = 80; x < 1840; x += 140 + r() * 60) g.ground.push({ x, y, len: 90 + r() * 90, w: 4 + r() * 2, bow: (r() - .5) * 8 });
+  return g;
+})();
+const LEAVES = [[260, 760, 300, 90, -1.2], [430, 640, 280, 84, -2.0], [520, 640, 300, 88, 0.1], [700, 540, 260, 76, -0.7], [180, 900, 250, 80, 0.4]];
+
+function gouge(ctx, x1, y1, x2, y2, w, bow = 0) {
+  const dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy) || 1, nx = -dy / L, ny = dx / L;
+  const mx = (x1 + x2) / 2 + nx * bow, my = (y1 + y2) / 2 + ny * bow;
+  ctx.beginPath(); ctx.moveTo(x1, y1);
+  ctx.quadraticCurveTo(mx + nx * w, my + ny * w, x2, y2);
+  ctx.quadraticCurveTo(mx - nx * w, my - ny * w, x1, y1); ctx.fill();
+}
+
+// carving schedule: [stage, frame it starts, frames it takes]
+const STAGES = { title: [0, 6], sun: [6, 3], rays: [9, 12], ground: [21, 6], halos: [27, 5], veins: [32, 5], cherries: [37, 3], cup: [40, 4], steam: [44, 4] };
+const prog = (name, f) => { const [s, d] = STAGES[name]; return Math.max(0, Math.min(1, (f - s + 1) / d)); };
+const upto = (name, f, n) => Math.floor(prog(name, f) * n + 1e-6);
+
+function keyBlock(k, f) {
+  const live = f >= T_LIVE, fl = f - T_LIVE;
+  const rayTurn = live ? Math.floor(fl / 2) * 0.006 : 0;
+  k.clearRect(0, 0, W, H); k.fillStyle = '#000'; k.strokeStyle = '#000'; k.lineCap = 'round'; k.lineJoin = 'round';
+  k.beginPath(); G.edge.forEach(([x, y], i) => i ? k.lineTo(x, y) : k.moveTo(x, y)); k.fill();
+
+  k.globalCompositeOperation = 'destination-out';
+  if (prog('sun', f) > 0) { k.beginPath(); k.arc(SUN[0], SUN[1], 150 * Math.min(1, prog('sun', f) * 1.01), 0, 7); k.fill(); }
+  G.rays.slice(0, upto('rays', f, G.rays.length)).forEach(({ a, w, bow }) => { const A = a + rayTurn;
+    gouge(k, SUN[0] + Math.cos(A) * 175, SUN[1] + Math.sin(A) * 175, SUN[0] + Math.cos(A) * 1300, SUN[1] + Math.sin(A) * 1300, w, bow); });
+  G.ground.slice(0, upto('ground', f, G.ground.length)).forEach(({ x, y, len, w, bow }) => gouge(k, x, y + Math.sin(x / 90) * 8, x + len, y + Math.sin((x + len) / 90) * 8, w, bow));
+
+  const leafPath = ([x, y, l, w, r]) => { k.save(); k.translate(x, y); k.rotate(r);
+    k.beginPath(); k.moveTo(0, 0); k.bezierCurveTo(l * .3, -w, l * .75, -w * .9, l, 0); k.bezierCurveTo(l * .75, w * .9, l * .3, w, 0, 0); k.restore(); };
+  const branch = () => { k.beginPath(); k.moveTo(60, 1000); k.bezierCurveTo(260, 800, 420, 660, 760, 520); };
+  const cupPath = () => { k.beginPath(); k.moveTo(1260, 610); k.lineTo(1640, 610); k.lineTo(1600, 900); k.lineTo(1300, 900); k.closePath(); };
+  const handle = () => { k.beginPath(); k.arc(1650, 720, 70, -1.4, 1.4); };
+  const saucer = () => { k.beginPath(); k.ellipse(1450, 910, 300, 40, 0, 0, 7); };
+  // halos (carved outline gaps) around the solid shapes, one shape at a time
+  const halos = [() => { k.lineWidth = 60; branch(); k.stroke(); }, ...LEAVES.map(L => () => { k.lineWidth = 24; leafPath(L); k.stroke(); k.fill(); }),
+    () => { k.lineWidth = 24; cupPath(); k.stroke(); k.fill(); k.lineWidth = 60; handle(); k.stroke(); k.lineWidth = 24; saucer(); k.stroke(); k.fill(); }];
+  halos.slice(0, upto('halos', f, halos.length)).forEach(h => h());
+  if (prog('title', f) > 0) k.fillRect(100, 70, 1060, 290);
+  // re-ink: the uncut shapes stay black (harmless before their halo is cut)
+  k.globalCompositeOperation = 'source-over';
+  k.fillRect(118, 86, 1024, 258); k.lineWidth = 34; branch(); k.stroke();
+  LEAVES.forEach(L => { leafPath(L); k.fill(); }); cupPath(); k.fill(); k.lineWidth = 36; handle(); k.stroke(); saucer(); k.fill();
+
+  k.globalCompositeOperation = 'destination-out';
+  LEAVES.slice(0, upto('veins', f, LEAVES.length)).forEach(([x, y, l, w, r]) => { k.save(); k.translate(x, y); k.rotate(r);
+    gouge(k, 16, 0, l - 20, 0, 5);
+    for (let t = 0.2; t < 0.9; t += 0.14) { const px = l * t; gouge(k, px, 0, px + 40, -w * 0.62 * (1 - Math.abs(t - .45)), 3.5, 6); gouge(k, px, 0, px + 40, w * 0.62 * (1 - Math.abs(t - .45)), 3.5, -6); }
+    k.restore(); });
+  const cher = cherriesAt(f);
+  cher.slice(0, upto('cherries', f, cher.length)).forEach(([x, y, r]) => { k.beginPath(); k.arc(x, y, r + 6, 0, 7); k.fill(); });
+  const nh = upto('cup', f, 11);
+  for (let i = 0; i < Math.min(9, nh); i++) { const y = 650 + i * 28, t = (y - 610) / 290, xl = 1260 + 40 * t + 24, xr = 1640 - 40 * t - 24 - i * 14; gouge(k, xl + i * 6, y, xr, y + 6, 4, 10); }
+  if (nh > 9) { k.beginPath(); k.ellipse(1450, 610, 190, 28, 0, 0, 7); k.fill(); }
+  if (nh > 10) gouge(k, 1180, 912, 1720, 912, 4, 0);
+  // steam: carved on in 4 frames, then the S-strokes rise one notch every 2 frames
+  const ns = upto('steam', f, 15), rise = live ? Math.floor(fl / 2) % 6 : 0;
+  let si = 0;
+  [1380, 1450, 1520].forEach(x => { for (let j = 0; j < 5; j++) { if (si++ >= ns) continue;
+    const y = 575 - j * 42 - rise * 7, flip = (j + (live ? Math.floor(fl / 12) : 0)) % 2;
+    if (y < 360) continue;
+    gouge(k, x + (flip ? -18 : 18), y, x + (flip ? 18 : -18), y - 42, 7, flip ? 14 : -14); } });
+  // title letters carved one at a time
+  const title = [['FROM CHERRY', 150, 205], ['TO CUP', 150, 322]], nt = upto('title', f, 17);
+  k.font = '118px "Alfa Slab One"'; k.textBaseline = 'alphabetic';
+  let n = 0; title.forEach(([s, x, y]) => { let cx = x; for (const ch of s) { if (n++ < nt) k.fillText(ch, cx, y); cx += k.measureText(ch).width; } });
+  // splash: carved droplets around the cup rim after the drop lands
+  if (f >= DROP.f1 && f < DROP.f1 + 12) splash(k, f - DROP.f1, 6);
+  k.globalCompositeOperation = 'source-over';
+  // shadow crescents + stems back in on the cut cherries
+  cher.slice(0, upto('cherries', f, cher.length)).forEach(([x, y, r, falling]) => { k.save(); k.beginPath(); k.arc(x, y, r, 0, 7); k.clip();
+    k.beginPath(); k.arc(x - r * .35, y - r * .35, r * 1.05, 0, 7); k.arc(x, y, r * 2, 0, 7, true); k.fill(); k.restore();
+    if (!falling) { k.lineWidth = 7; k.beginPath(); k.moveTo(x, y - r); k.lineTo(x + 10, y - r - 26); k.stroke(); } });
+}
+function splash(g, a, grow) {
+  // droplets leave the rim on low ballistic arcs (peak ~60 px, stays below the sun)
+  for (let i = 0; i < 10; i++) {
+    const ang = Math.PI * (0.08 + i * 0.093), side = Math.cos(ang);
+    const x0 = 1450 + side * 175, vx = side * (10 + (i % 3) * 4), vy = -(11 + (i % 2) * 3);
+    const x = x0 + vx * a, y = 600 + vy * a + 1.7 * a * a;
+    if (y > 640) continue;
+    g.beginPath(); g.arc(x, y, Math.max(4, 13 - a * 0.8) + grow, 0, 7); g.fill();
+  }
+}
+function cherriesAt(f) {
+  const list = CHERRIES.map(c => [...c, false]);
+  if (f < DROP.f0) return [...list, [DROP.from[0], DROP.from[1], DROP.r, false]];
+  if (f >= DROP.f1) return list;
+  const t = (f - DROP.f0) / (DROP.f1 - DROP.f0), e = t * t;                    // gravity: accelerating on a parabola
+  const x = DROP.from[0] + (DROP.to[0] - DROP.from[0]) * t, y = DROP.from[1] + (DROP.to[1] - DROP.from[1]) * e - Math.sin(t * Math.PI) * 260 * (1 - t);
+  return [...list, [x, y, DROP.r * (1 - 0.25 * t), true]];
+}
+function redBlock(r, f) {
+  r.clearRect(0, 0, W, H); r.fillStyle = '#000';
+  r.beginPath(); r.arc(SUN[0], SUN[1], 160, 0, 7); r.fill();
+  cherriesAt(f).forEach(([x, y, rad]) => { r.beginPath(); r.arc(x, y, rad + 10, 0, 7); r.fill(); });
+  r.beginPath(); r.ellipse(1450, 612, 196, 32, 0, 0, 7); r.fill();
+  if (f >= DROP.f1 && f < DROP.f1 + 12) splash(r, f - DROP.f1, 0);
+}
+
+// ---- static fields: edge-jitter lookup, roller unevenness, paper texture
+const JIT = new Int32Array(W * H), ROLL = new Float32Array(W * H), PAPERF = new Float32Array(W * H);
+for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+  const i = y * W + x;
+  const jx = Math.min(W - 1, Math.max(0, Math.round(x + (vn(x / 6, y / 6) - .5) * 5))), jy = Math.min(H - 1, Math.max(0, Math.round(y + (vn(x / 6 + 40, y / 6) - .5) * 5)));
+  JIT[i] = jy * W + jx; ROLL[i] = 0.8 + 0.2 * vn(x / 300, y / 60); PAPERF[i] = 1 - 0.035 * vn(x / 2, y / 9);
+}
+const KEY = layer(), RED = layer();
+const out = document.getElementById('c').getContext('2d'), img = out.createImageData(W, H), px = img.data;
+
+function drawFrame(f) {
+  keyBlock(KEY, f); redBlock(RED, f);
+  const ka = KEY.getImageData(0, 0, W, H).data, ra = RED.getImageData(0, 0, W, H).data;
+  const imp = Math.floor(f / 2), rnd = lcg(1000 + imp * 7919);               // one impression per 2 frames
+  const jit = f >= T_LIVE ? [Math.round((rnd() - .5) * 3), Math.round((rnd() - .5) * 3)] : [0, 0];
+  // red stamp: lands at f=T_STAMP with a big offset that settles over 6 frames
+  const redOn = f >= T_STAMP;
+  const sOff = [[22, -16], [14, -9], [8, -5], [6, 2], [5, 4], [5, 3]][Math.min(5, f - T_STAMP)] || [5, 3];
+  const redStrength = redOn ? [0.55, 0.8, 0.95][Math.min(2, f - T_STAMP)] || 0.95 : 0;
+  const shake = f === T_STAMP ? [0, 6] : f === T_STAMP + 1 ? [0, -3] : [0, 0];
+  const keyOff = [jit[0], jit[1]], redOff = [sOff[0] + jit[1], sOff[1] - jit[0]];
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x, o = i * 4;
+    const X = x - shake[0], Y = y - shake[1];
+    let r = 242, g = 237, b = 227;
+    const pf = PAPERF[i] - 0.02 * rnd(); r *= pf; g *= pf; b *= pf;
+    if (redOn) {
+      const sx = X - redOff[0], sy = Y - redOff[1];
+      if (sx >= 0 && sy >= 0 && sx < W && sy < H) { const j = sy * W + sx;
+        if (ra[JIT[j] * 4 + 3] > 127) { let v = redStrength * ROLL[j] * (rnd() < 0.03 + 0.05 * (ROLL[j] - .8) * 5 ? 0.25 : 1);
+          r *= 1 - v * (1 - 200 / 255); g *= 1 - v * (1 - 50 / 255); b *= 1 - v * (1 - 42 / 255); } }
+    }
+    const sx = X - 5 - keyOff[0], sy = Y - 3 - keyOff[1];
+    if (sx >= 0 && sy >= 0 && sx < W && sy < H) { const j = sy * W + sx;
+      if (ka[JIT[j] * 4 + 3] > 127) { const v = 0.97 * ROLL[j] * (rnd() < 0.03 + 0.05 * (ROLL[j] - .8) * 5 ? 0.25 : 1);
+        r *= 1 - v * (1 - 27 / 255); g *= 1 - v * (1 - 23 / 255); b *= 1 - v * (1 - 20 / 255); } }
+    px[o] = r; px[o + 1] = g; px[o + 2] = b; px[o + 3] = 255;
+  }
+  out.putImageData(img, 0, 0);
+}
+window.FRAMES = FRAMES; window.FPS = FPS;
+window.renderFrame = async f => { drawFrame(f); return document.getElementById('c').toDataURL('image/png'); };
+document.fonts.load('118px "Alfa Slab One"').then(() => { drawFrame(Number(new URLSearchParams(location.search).get('f') || 0)); window.__ready = true; });
+</script></body></html>

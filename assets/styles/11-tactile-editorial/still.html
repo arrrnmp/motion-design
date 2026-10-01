@@ -1,0 +1,32 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;1,6..72,300&display=block" rel="stylesheet">
+<style>
+/* TACTILE EDITORIAL — full-bleed macro plate (Blender), hard crop, one quiet serif in cream, hairline
+   rule, small uppercase metadata, breathing grain. Motion rule: light and time only — slow push
+   (1-3%/s), re-grades, fades from black; nothing bounces. */
+*{margin:0;box-sizing:border-box}
+body{width:1920px;height:1080px;overflow:hidden;background:#140c08;position:relative;font-family:Newsreader;color:#f1e6d6}
+.plate{position:absolute;inset:0;width:1920px;height:1080px}
+.shade{position:absolute;inset:0;background:linear-gradient(200deg,rgba(20,12,8,.55) 0%,rgba(20,12,8,0) 45%)}
+h1{position:absolute;right:120px;top:120px;text-align:right;font-weight:300;font-style:italic;font-size:118px;line-height:1.02;letter-spacing:-.01em}
+.rule{position:absolute;right:120px;top:400px;width:420px;height:1.5px;background:#f1e6d6;opacity:.75}
+.dek{position:absolute;right:120px;top:428px;width:520px;text-align:right;font-size:32px;line-height:1.35;opacity:.92}
+.meta{position:absolute;left:120px;bottom:72px;font-size:22px;letter-spacing:.24em;text-transform:uppercase;opacity:.8}
+canvas{position:absolute;inset:0;mix-blend-mode:overlay;opacity:.16}
+</style></head><body>
+<img class="plate" src="11-tactile-macro.jpg">
+<div class="shade"></div>
+<h1>From cherry<br>to cup</h1>
+<div class="rule"></div>
+<p class="dek">Before the roast, every bean was one of two seeds inside a fruit like this.</p>
+<div class="meta">Coffea arabica &nbsp;·&nbsp; Chapter one: the fruit</div>
+<canvas id="g" width="1920" height="1080"></canvas>
+<script>
+// seeded film grain
+const c = document.getElementById('g').getContext('2d'), d = c.createImageData(1920, 1080);
+let s = 9; const r = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+for (let i = 0; i < d.data.length; i += 4) { const v = 128 + (r() + r() + r() - 1.5) * 90; d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 255; }
+c.putImageData(d, 0, 0);
+</script>
+</body></html>

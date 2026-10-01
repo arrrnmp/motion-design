@@ -1,0 +1,75 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,900&family=Permanent+Marker&family=Libre+Barcode+39&family=Courier+Prime:wght@400;700&display=block" rel="stylesheet">
+<style>
+/* BRUTAL EDITORIAL (v2) — Businessweek-cover brutalism instead of bento-card neo-brutalism.
+   Collide registers: raw 1996 HTML (Times, default link blue, <hr>, border=1 tables), OS chrome
+   (Win95 bevel dialog + cursor), giant cropped grotesk bleeding off the frame, a real photo cut-out
+   sticker, and hand marks (highlighter, red marker). Flat safety-yellow page. Nothing is centred.
+   Motion rule: hard cuts and jump-zooms; elements are pasted in (0 -> 1 in one frame, 2-frame
+   overshoot), the cursor moves in straight lines and clicks; marker strokes draw on fast. */
+*{margin:0;box-sizing:border-box}
+body{width:1920px;height:1080px;overflow:hidden;background:#ffe600;position:relative;color:#000}
+.giant{position:absolute;left:-40px;bottom:-150px;font-family:Archivo;font-weight:900;font-stretch:62%;font-size:640px;line-height:.8;letter-spacing:-.02em;white-space:nowrap}
+.raw{position:absolute;left:56px;top:48px;width:700px;font-family:"Times New Roman",Times,serif;font-size:30px;line-height:1.25}
+.raw h1{font-size:64px;font-weight:bold;line-height:1;margin-bottom:10px}
+.raw a{color:#0000ee;text-decoration:underline}
+.raw a.v{color:#551a8b}
+.raw hr{border:0;border-top:2px solid #808080;border-bottom:2px solid #fff;margin:14px 0}
+.hl{position:relative;z-index:0}
+.hl::before{content:"";position:absolute;left:-8px;right:-10px;top:6px;bottom:0;background:#ff4fb8;opacity:.75;z-index:-1;transform:rotate(-1.5deg);border-radius:3px 12px 4px 10px}
+table{border-collapse:separate;border:2px outset #bbb;font-family:"Times New Roman",serif;font-size:26px;background:#fff}
+td,th{border:2px inset #bbb;padding:4px 14px}
+.tbl{position:absolute;left:820px;top:60px}
+.photo{position:absolute;left:1010px;top:250px;width:520px;height:520px;border-radius:50%;background:url(11-tactile-macro.jpg) no-repeat;background-size:1920px 1080px;background-position:-380px -240px;
+  box-shadow:0 0 0 14px #fff,14px 18px 0 14px #000;transform:rotate(-6deg)}
+.win{position:absolute;left:1360px;top:120px;width:460px;background:#c0c0c0;border:3px solid;border-color:#fff #404040 #404040 #fff;box-shadow:inset -2px -2px #808080,inset 2px 2px #dfdfdf;font-family:"MS Sans Serif",Tahoma,Arial,sans-serif;font-size:22px}
+.win .bar{background:linear-gradient(90deg,#000080,#1084d0);color:#fff;font-weight:bold;padding:6px 10px;display:flex;justify-content:space-between}
+.win .bar span:last-child{background:#c0c0c0;color:#000;border:2px solid;border-color:#fff #404040 #404040 #fff;width:28px;text-align:center;line-height:20px}
+.win .body{padding:22px 20px;display:flex;gap:18px;align-items:center}
+.win .ico{width:52px;height:52px;border-radius:50%;background:#ffe600;border:3px solid #000;display:grid;place-items:center;font:bold 34px Georgia}
+.win .btns{display:flex;justify-content:flex-end;gap:14px;padding:0 20px 20px}
+.win button{font:inherit;min-width:120px;padding:6px 0;background:#c0c0c0;border:3px solid;border-color:#fff #404040 #404040 #fff}
+.win button.def{outline:2px solid #000;outline-offset:1px}
+.cursor{position:absolute;left:1748px;top:286px;width:34px}
+.marker{position:absolute;font-family:"Permanent Marker";color:#e3000f;font-size:44px;line-height:1}
+.barcode{position:absolute;right:56px;bottom:40px;background:#fff;padding:10px 18px 4px;border:3px solid #000;text-align:center;font-family:"Courier Prime";font-size:20px;font-weight:700}
+.barcode b{display:block;font-family:"Libre Barcode 39";font-weight:400;font-size:96px;line-height:1}
+.price{position:absolute;left:1510px;top:640px;width:210px;height:210px;border-radius:50%;background:#e3000f;color:#fff;display:grid;place-items:center;text-align:center;font-family:Archivo;font-weight:900;font-stretch:80%;font-size:46px;line-height:.95;transform:rotate(12deg)}
+.fig{position:absolute;left:56px;top:340px;transform:rotate(2deg);background:#fff;padding:12px 12px 6px;border:3px solid #000}
+.xerox{width:500px;height:300px;background:url(07-beans-plate.jpg) no-repeat center/cover;filter:grayscale(1) contrast(2.6) brightness(1.15)}
+.fig p{font-family:"Courier Prime";font-weight:700;font-size:20px;padding-top:6px}
+svg.marks{position:absolute;inset:0;pointer-events:none}
+</style></head><body>
+<div class="giant">CHERRY→CUP</div>
+<div class="raw">
+  <h1>From cherry to cup</h1>
+  <hr>
+  Every coffee cherry hides <span class="hl"><a href="#">two seeds</a></span>. Dry them, roast them, grind them &mdash; <a class="v" href="#">that&rsquo;s the stuff in your mug</a>.
+  <hr>
+  <small>Last modified: Tuesday, 30-Sep-26 07:14:02 GMT &nbsp;[<a href="#">back</a>]</small>
+</div>
+<div class="tbl"><table>
+  <tr><th>ITEM</th><th>QTY</th></tr>
+  <tr><td>cherry</td><td>1</td></tr>
+  <tr><td>seeds</td><td>2</td></tr>
+  <tr><td>bar</td><td>9</td></tr>
+</table></div>
+<div class="photo"></div>
+<div class="win">
+  <div class="bar"><span>cherry.exe</span><span>×</span></div>
+  <div class="body"><div class="ico">?</div><div>Split this fruit and<br>remove 2 seeds?</div></div>
+  <div class="btns"><button>Cancel</button><button class="def">Split</button></div>
+</div>
+<svg class="cursor" viewBox="0 0 12 19"><path d="M0 0v16l4-4 3 7 2-1-3-7h5z" fill="#fff" stroke="#000" stroke-width="1"/></svg>
+<div class="price">FREE<br>SEEDS<br><span style="font-size:26px">×2</span></div>
+<div class="marker" style="left:760px;top:420px;transform:rotate(-8deg)">this is<br>a FRUIT</div>
+<div class="fig"><div class="xerox"></div><p>FIG. 2 &mdash; AFTER (ROASTED)</p></div>
+<div class="marker" style="left:600px;top:600px;transform:rotate(-3deg);font-size:38px">&larr; not a<br>cherry anymore</div>
+<svg class="marks" viewBox="0 0 1920 1080">
+  <path d="M930 470 C960 500 990 510 1030 505" stroke="#e3000f" stroke-width="8" fill="none" stroke-linecap="round"/>
+  <path d="M1000 482 L1032 505 L996 526" stroke="#e3000f" stroke-width="8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <ellipse cx="918" cy="174" rx="92" ry="30" stroke="#e3000f" stroke-width="6" fill="none" transform="rotate(-6 892 148)"/>
+</svg>
+<div class="barcode"><b>*CF001*</b>ROAST BY: FIRST CRACK</div>
+</body></html>

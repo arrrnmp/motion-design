@@ -1,0 +1,194 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@700;800&display=block" rel="stylesheet">
+<style>html,body{margin:0;background:#f3f0e8}canvas{display:block}</style>
+</head><body><canvas id="c" width="1920" height="1080"></canvas>
+<script>
+/* RISO RADIO — long-form ambient loop (sample: 96 s, 12 fps). A slow world printed on a two-ink risograph that
+   re-prints every 2 frames (register + speckle re-roll): the cherry lives through a day in four vignettes,
+   each its own ink pair (time of day = which drums are in the machine, never a dark ground). A new sheet slides in
+   over the last one between vignettes. The only UI is a stamped "now playing" label. The last frame equals the
+   first, so the sample loops; a 2-hour version is the same engine with a longer schedule.
+   window.renderFrame(f) is deterministic. */
+window.__ready = false;
+const W = 1920, H = 1080, FPS = 12;
+const SCENE_LEN = 24 * FPS, SLIDE = 18, SCENES = 4, FRAMES = SCENES * SCENE_LEN;
+const INKS = {                                   // [warm ink A (sun, character, accents), cool ink B (world)], paper
+  dawn:  { A: [255, 72, 176], B: [0, 131, 138], paper: [244, 238, 226] },    // fluorescent pink + teal
+  day:   { A: [241, 80, 96],  B: [50, 85, 164], paper: [243, 240, 232] },    // bright red + medium blue
+  dusk:  { A: [255, 108, 47], B: [118, 91, 167], paper: [245, 236, 222] },   // orange + purple
+  night: { A: [255, 72, 176], B: [0, 120, 191], paper: [240, 238, 230] },    // fluoro pink + blue, blue screened heavy
+};
+const TRACKS = ['01  Morning on the Branch', '02  Cargo Bike to Town', '03  Hammock Hours', '04  Rowing Home'];
+
+// ---------------------------------------------------------------- helpers
+const lcg = s => () => ((s = (s * 16807) % 2147483647) / 2147483647);
+const P = (() => { const r = lcg(18); return Array.from({ length: 1024 }, r); })();
+const h1 = i => P[((i * 97 + 13) % 1024 + 1024) % 1024];
+function vn(x, y) { const X = Math.floor(x), Y = Math.floor(y), fx = x - X, fy = y - Y, s = t => t * t * (3 - 2 * t);
+  const h = (a, b) => P[((a * 73 + b * 151) % 1024 + 1024) % 1024];
+  const a = h(X, Y), b = h(X + 1, Y), c = h(X, Y + 1), d = h(X + 1, Y + 1);
+  return a + (b - a) * s(fx) + (c - a) * s(fy) + (a - b - c + d) * s(fx) * s(fy); }
+const layer = () => { const c = document.createElement('canvas'); c.width = W; c.height = H; return c.getContext('2d', { willReadFrequently: true }); };
+const A = layer(), B = layer();
+const d = v => `rgba(0,0,0,${v})`;
+const hill = (g, base, amp, per, ph, off, dens) => { g.fillStyle = d(dens); g.beginPath(); g.moveTo(0, H);
+  for (let x = 0; x <= W; x += 16) g.lineTo(x, base - amp * (0.6 * Math.sin((x + off) / per + ph) + 0.4 * Math.sin((x + off) / (per * 0.43) + ph * 1.7)));
+  g.lineTo(W, H); g.closePath(); g.fill(); };
+const knock = (g, fn) => { g.save(); g.globalCompositeOperation = 'destination-out'; fn(); g.restore(); };
+
+// the cherry character (drawn into the warm plate; eyes + highlight knocked out)
+function cherry(x, y, s, o = {}) {
+  A.save(); A.translate(x, y); A.rotate(o.rot || 0); A.scale(s, s);
+  A.fillStyle = d(1); A.beginPath(); A.ellipse(0, 0, 34, 31, 0, 0, 7); A.fill();
+  knock(B, () => { B.save(); B.setTransform(A.getTransform()); B.fillStyle = '#000'; B.beginPath(); B.ellipse(0, 0, 32, 29, 0, 0, 7); B.fill(); B.restore(); });
+  // legs / arms as ink strokes
+  A.strokeStyle = d(1); A.lineWidth = 5; A.lineCap = 'round';
+  (o.limbs || [[-12, 28, -16, 52], [12, 28, 16, 52]]).forEach(([a, b, c, e]) => { A.beginPath(); A.moveTo(a, b); A.lineTo(c, e); A.stroke(); });
+  A.restore();
+  knock(A, () => { A.save(); A.translate(x, y); A.rotate(o.rot || 0); A.scale(s, s); A.fillStyle = '#000';
+    A.beginPath(); A.ellipse(-12, -12, 9, 5, -0.7, 0, 7); A.fill();                                   // highlight
+    if (o.sleep) { A.lineWidth = 3; A.strokeStyle = '#000'; [-8, 12].forEach(ex => { A.beginPath(); A.arc(ex, 0, 5, 0.2, Math.PI - 0.2); A.stroke(); }); }
+    else [-8, 12].forEach(ex => { A.beginPath(); A.arc(ex + (o.look || 0), -1, 4.2, 0, 7); A.fill(); });
+    A.restore(); });
+  // leaf + stem in the cool ink
+  B.save(); B.translate(x, y); B.rotate(o.rot || 0); B.scale(s, s);
+  B.strokeStyle = d(1); B.lineWidth = 4; B.beginPath(); B.moveTo(2, -30); B.quadraticCurveTo(6, -44, 16, -50); B.stroke();
+  B.fillStyle = d(0.8); B.beginPath(); B.moveTo(16, -50); B.quadraticCurveTo(38, -66, 50, -50); B.quadraticCurveTo(34, -40, 16, -50); B.fill();
+  B.restore();
+}
+
+// ---------------------------------------------------------------- the four vignettes (time t in seconds within the scene)
+const SC = [
+  function dawn(t, f) {
+    const sunY = 700 - 14 * t;                                         // sun rising
+    A.fillStyle = d(0.42); A.beginPath(); A.arc(1320, sunY, 230, 0, 7); A.fill();
+    hill(B, 760, 60, 260, 0.6, 3 * t, 0.28); hill(B, 850, 45, 190, 2.2, 6 * t, 0.52);
+    knock(B, () => { B.fillStyle = '#000'; for (let k = 0; k < 3; k++) { B.globalAlpha = 0.5; B.fillRect(0, 700 + k * 40 + 6 * Math.sin(t / 3 + k), W, 12); } });   // mist bands
+    // birds crossing
+    B.strokeStyle = d(1); B.lineWidth = 4;
+    for (let k = 0; k < 5; k++) { const bx = (t * 60 + k * 170) % 2400 - 200, by = 260 + k * 30 + 10 * Math.sin(k), w = Math.floor(f / 2 + k) % 2 ? 14 : 8;
+      B.beginPath(); B.moveTo(bx - 18, by - w); B.lineTo(bx, by); B.lineTo(bx + 18, by - w); B.stroke(); }
+    // foreground branch, leaves; the cherry sits and swings its legs
+    B.lineWidth = 46; B.lineCap = 'round'; B.beginPath(); B.moveTo(-40, 690); B.bezierCurveTo(300, 610, 560, 640, 900, 560); B.stroke();
+    B.fillStyle = d(0.75);
+    [[140, 650, -0.4], [330, 600, 0.5], [520, 630, -0.6], [700, 590, 0.4], [860, 545, -0.3]].forEach(([x, y, r], k) => {
+      const sw = 0.06 * Math.sin(t * 1.3 + k); B.save(); B.translate(x, y); B.rotate(r + sw);
+      B.beginPath(); B.moveTo(0, 0); B.bezierCurveTo(50, -60, 150, -60, 190, 0); B.bezierCurveTo(150, 50, 50, 50, 0, 0); B.fill(); B.restore(); });
+    const swing = Math.sin(t * 2.2) * 10;
+    cherry(600, 570, 1.5, { limbs: [[-12, 28, -18 + swing, 58], [12, 28, 18 - swing, 58]], look: 3 });
+  },
+  function day(t, f) {
+    const scroll = 90 * t;
+    A.fillStyle = d(0.16); for (let k = 0; k < 4; k++) { const cx = ((k * 620 - scroll * 0.15) % 2600 + 2600) % 2600 - 300; A.beginPath(); A.ellipse(cx, 400 + k * 22, 150, 40, 0, 0, 7); A.fill(); }
+    A.fillStyle = d(0.5); A.beginPath(); A.arc(1240, 440, 80, 0, 7); A.fill();
+    hill(B, 640, 70, 300, 1, scroll * 0.25, 0.25); hill(B, 760, 50, 220, 3, scroll * 0.5, 0.5);
+    B.fillStyle = d(0.85); B.fillRect(0, 880, W, H - 880);                                            // road
+    knock(B, () => { B.fillStyle = '#000'; for (let x = -((scroll) % 160); x < W; x += 160) B.fillRect(x, 950, 80, 10); });
+    // cargo bike: frame + wheels (cool ink), crate of beans, cherry riding (bob on the pedal cycle)
+    const bx = 860, by = 800, bob = Math.floor(f / 2) % 2 ? 3 : 0;
+    B.strokeStyle = d(1); B.lineWidth = 8;
+    [[bx - 150, by + 50], [bx + 110, by + 50]].forEach(([wx, wy]) => { B.beginPath(); B.arc(wx, wy, 58, 0, 7); B.stroke();
+      const a0 = -scroll / 58; for (let k = 0; k < 3; k++) { const a = a0 + k * 2.09; B.lineWidth = 3; B.beginPath(); B.moveTo(wx, wy); B.lineTo(wx + Math.cos(a) * 58, wy + Math.sin(a) * 58); B.stroke(); } B.lineWidth = 8; });
+    B.beginPath(); B.moveTo(bx - 150, by + 50); B.lineTo(bx - 40, by - 10); B.lineTo(bx + 110, by + 50); B.moveTo(bx - 40, by - 10); B.lineTo(bx + 60, by - 40); B.lineTo(bx + 70, by - 70); B.stroke();
+    B.fillStyle = d(0.9); B.fillRect(bx - 250, by - 60, 150, 90);                                       // crate
+    knock(B, () => { B.fillStyle = '#000'; for (let k = 0; k < 6; k++) { B.beginPath(); B.ellipse(bx - 230 + k * 24, by - 66 + (k % 2) * 6, 11, 8, k, 0, 7); B.fill(); } });
+    A.fillStyle = d(0.8); for (let k = 0; k < 6; k++) { A.beginPath(); A.ellipse(bx - 230 + k * 24, by - 66 + (k % 2) * 6, 9, 6, k, 0, 7); A.fill(); }   // beans
+    const ped = Math.sin(scroll / 30) * 14;
+    cherry(bx - 30, by - 70 + bob, 1.3, { limbs: [[-10, 28, -20 + ped, 60], [10, 28, 20 - ped, 60], [18, 0, 70, -2]], look: 4 });
+  },
+  function dusk(t, f) {
+    A.fillStyle = d(0.55); A.beginPath(); A.arc(960, 820, 330, Math.PI, 0); A.fill();                  // big low sun
+    knock(A, () => { A.fillStyle = '#000'; for (let k = 0; k < 6; k++) A.fillRect(600, 560 + k * 44, 720, 10 + k * 2); });
+    hill(B, 830, 30, 340, 0.3, 0, 0.6);
+    // two trees + hammock, the cherry asleep, rocking; z's drift up
+    B.fillStyle = d(1); [[330, 1], [1590, -1]].forEach(([x]) => { B.fillRect(x - 22, 380, 44, 520);
+      B.beginPath(); B.ellipse(x, 360, 190, 150, 0, 0, 7); B.fill(); });
+    knock(B, () => { B.fillStyle = '#000'; for (let k = 0; k < 30; k++) { B.beginPath(); B.arc(330 + (h1(k) - 0.5) * 320, 330 + (h1(k + 40) - 0.5) * 220, 6 + h1(k + 9) * 10, 0, 7); B.fill(); } });
+    const rock = Math.sin(t * 0.9) * 22;
+    A.strokeStyle = d(0.85); A.lineWidth = 7; A.beginPath(); A.moveTo(352, 600); A.quadraticCurveTo(960, 820 + rock, 1568, 600); A.stroke();
+    A.fillStyle = d(0.6); A.beginPath(); A.moveTo(520, 660); A.quadraticCurveTo(960, 860 + rock, 1400, 660); A.quadraticCurveTo(960, 780 + rock, 520, 660); A.fill();
+    cherry(960 + rock * 0.4, 700 + rock * 0.7, 1.4, { sleep: true, rot: 1.35, limbs: [[-12, 28, -14, 46], [12, 28, 14, 46]] });
+    B.font = '800 60px Archivo'; B.fillStyle = d(1);
+    for (let k = 0; k < 3; k++) { const ph = (t * 0.35 + k / 3) % 1; B.globalAlpha = ph < 0.85 ? 1 : (1 - ph) / 0.15; B.fillText('z', 1010 + ph * 120 + k * 10, 640 - ph * 240); }
+    B.globalAlpha = 1;
+    // fireflies = paper knocked out of the sky
+    knock(A, () => { A.fillStyle = '#000'; for (let k = 0; k < 14; k++) if (h1(k * 7 + Math.floor(f / 3)) > 0.4) { A.beginPath(); A.arc(200 + h1(k) * 1500, 420 + h1(k + 3) * 260 + 20 * Math.sin(t + k), 5, 0, 7); A.fill(); } });
+  },
+  function night(t, f) {
+    B.fillStyle = d(0.82); B.fillRect(0, 0, W, 700);                                                   // night sky: heavy blue screen
+    knock(B, () => { B.fillStyle = '#000'; B.beginPath(); B.arc(1250, 470, 90, 0, 7); B.fill();       // moon + stars knocked out
+      for (let k = 0; k < 60; k++) { if (h1(k * 3 + Math.floor(f / 4)) < 0.15) continue; B.beginPath(); B.arc(h1(k) * W, h1(k + 99) * 620, 2 + h1(k + 7) * 3, 0, 7); B.fill(); } });
+    hill(B, 700, 40, 280, 1.5, 0, 1);
+    B.fillStyle = d(0.62); B.fillRect(0, 700, W, H - 700);                                            // lake
+    knock(B, () => { B.fillStyle = '#000'; for (let k = 0; k < 16; k++) { const y = 730 + k * 22, w = 240 - k * 8 + 40 * Math.sin(t * 1.4 + k); B.fillRect(1250 - w / 2 + 30 * Math.sin(t + k * 0.7), y, w, 5); } });   // moon path
+    // boat + rowing cherry; ripples from each stroke (knocked out rings)
+    const stroke = (t * 0.5) % 1, bx = 700 + 18 * t, by = 870 + 5 * Math.sin(t * 1.6);
+    knock(B, () => { B.strokeStyle = '#000'; B.lineWidth = 4; for (let k = 0; k < 3; k++) { const age = (stroke + k) * 1.6; B.beginPath(); B.ellipse(bx - 180 - age * 120 + k * 0, by + 30, 40 + age * 90, 8 + age * 18, 0, 0, 7); B.stroke(); } });
+    const hull = g => { g.beginPath(); g.moveTo(bx - 170, by); g.lineTo(bx + 170, by); g.lineTo(bx + 120, by + 55); g.lineTo(bx - 120, by + 55); g.closePath(); };
+    A.fillStyle = d(1); hull(A); A.fill(); knock(B, () => { B.fillStyle = '#000'; hull(B); B.fill(); });
+    const oar = Math.sin(stroke * Math.PI * 2) * 0.5;
+    A.strokeStyle = d(1); A.lineWidth = 7; A.beginPath(); A.moveTo(bx, by - 30); A.lineTo(bx - 190 * Math.cos(oar), by + 60 + 40 * Math.sin(oar)); A.stroke();
+    cherry(bx + 10, by - 50, 1.25, { limbs: [[-12, 20, -40, 30 + oar * 20], [12, 28, 16, 44]], look: -3 });
+  },
+];
+
+// ---------------------------------------------------------------- print a scene into an output buffer
+function screen(ctx, cell, ang, rnd) {
+  const a = ctx.getImageData(0, 0, W, H).data, cov = new Float32Array(W * H);
+  const th = ang * Math.PI / 180, cs = Math.cos(th), sn = Math.sin(th), k = 2 * Math.PI / cell;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x, dd = a[i * 4 + 3] / 255; if (dd < 0.01) continue;
+    let c = dd > 0.97 ? 1 : (dd > 1 - (0.5 + 0.25 * (Math.cos((x * cs + y * sn) * k) + Math.cos((-x * sn + y * cs) * k))) ? 1 : 0);
+    if (c && rnd() < 0.03) c = 0.4;
+    cov[i] = c * (0.84 + 0.16 * ROLL[i]);
+  }
+  return cov;
+}
+const ROLL = new Float32Array(W * H); for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) ROLL[y * W + x] = vn(x / 260, y / 90);
+const PAPERN = new Float32Array(W * H); { const r = lcg(3); for (let i = 0; i < W * H; i++) PAPERN[i] = 1 - 0.03 * r() - 0.025 * vn((i % W) / 3, Math.floor(i / W) / 3); }
+function printScene(s, t, f, out) {
+  const ink = Object.values(INKS)[s];
+  A.clearRect(0, 0, W, H); B.clearRect(0, 0, W, H);
+  const Z = [[1.4, 600, 600], [1.55, 800, 820], [1.3, 960, 720], [1.45, 820, 860]][s];
+  for (const g of [A, B]) g.setTransform(Z[0], 0, 0, Z[0], Z[1] * (1 - Z[0]), Z[2] * (1 - Z[0]));
+  SC[s](t, f);
+  for (const g of [A, B]) g.setTransform(1, 0, 0, 1, 0, 0);
+  // the stamped label (printed in the cool ink): side + track
+  B.font = '800 40px Archivo'; const tw = B.measureText('\u266A  ' + TRACKS[s]).width;
+  knock(B, () => { B.fillStyle = '#000'; B.save(); B.translate(90, 104); B.rotate(-0.02); B.fillRect(-26, -54, tw + 52, 76); B.restore(); });
+  B.save(); B.translate(90, 104); B.rotate(-0.02); B.strokeStyle = d(1); B.lineWidth = 4;
+  B.strokeRect(-18, -46, tw + 36, 62); B.fillStyle = d(1); B.fillText('\u266A  ' + TRACKS[s], 0, 0); B.restore();
+  const imp = Math.floor(f / 2), rnd = lcg(500 + imp * 7919 + s * 31);
+  const ca = screen(A, 11, 15, rnd), cb = screen(B, 11, 75, rnd);
+  const oA = [3 + Math.round((rnd() - .5) * 3), -2 + Math.round((rnd() - .5) * 3)];
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x, o = i * 4, pf = PAPERN[i];
+    let r = ink.paper[0] * pf, g = ink.paper[1] * pf, b = ink.paper[2] * pf;
+    const vb = cb[i]; if (vb) { r *= 1 - vb * (1 - ink.B[0] / 255); g *= 1 - vb * (1 - ink.B[1] / 255); b *= 1 - vb * (1 - ink.B[2] / 255); }
+    const sx = x - oA[0], sy = y - oA[1];
+    if (sx >= 0 && sy >= 0 && sx < W && sy < H) { const va = ca[sy * W + sx]; if (va) { r *= 1 - va * (1 - ink.A[0] / 255); g *= 1 - va * (1 - ink.A[1] / 255); b *= 1 - va * (1 - ink.A[2] / 255); } }
+    out[o] = r; out[o + 1] = g; out[o + 2] = b; out[o + 3] = 255;
+  }
+}
+
+// ---------------------------------------------------------------- frames: scenes + sheet slides; last frame == first
+const main = document.getElementById('c').getContext('2d'), IMG = main.createImageData(W, H), NEXT = main.createImageData(W, H);
+function drawFrame(f) {
+  f = f % FRAMES;
+  const s = Math.floor(f / SCENE_LEN), lf = f % SCENE_LEN, t = lf / FPS;
+  printScene(s, t, f, IMG.data);
+  main.putImageData(IMG, 0, 0);
+  if (lf >= SCENE_LEN - SLIDE) {                                  // the next sheet slides in from the right, eased, with a shadow
+    const u = (lf - (SCENE_LEN - SLIDE) + 1) / SLIDE, e = 1 - Math.pow(1 - u, 3), x0 = Math.round(W * (1 - e));
+    const ns = (s + 1) % SCENES; printScene(ns, 0, f, NEXT.data);
+    main.save(); const sh = main.createLinearGradient(x0 - 40, 0, x0, 0); sh.addColorStop(0, 'rgba(40,30,20,0)'); sh.addColorStop(1, 'rgba(40,30,20,.28)');
+    main.fillStyle = sh; main.fillRect(x0 - 40, 0, 40, H); main.restore();
+    main.putImageData(NEXT, x0, 0, 0, 0, W - x0, H);
+  }
+}
+window.FRAMES = FRAMES + 1; window.FPS = FPS;                     // frame FRAMES renders frame 0 again: the loop closes
+window.SCHEDULE = { fps: FPS, sceneLen: SCENE_LEN, slide: SLIDE, scenes: ['dawn', 'day', 'dusk', 'night'], tracks: TRACKS };
+window.renderFrame = async f => { drawFrame(f); return document.getElementById('c').toDataURL('image/png'); };
+document.fonts.load('800 60px Archivo').then(() => { drawFrame(Number(new URLSearchParams(location.search).get('f') || 0)); window.__ready = true; });
+</script></body></html>

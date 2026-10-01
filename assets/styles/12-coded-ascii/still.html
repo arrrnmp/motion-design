@@ -1,0 +1,102 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;800&family=Archivo+Black&display=block" rel="stylesheet">
+<style>html,body{margin:0;background:#f1eee6}canvas{display:block}</style>
+</head><body><canvas id="c" width="1920" height="1080"></canvas>
+<script>
+/* CODED ASCII — the entire frame is one 160x54 glyph grid. Every object is a procedural field
+   (SDF-shaded cup, fbm steam, lit sphere) quantised to a density ramp of characters; the title is
+   rasterised into the same grid. Light paper ground, black ink, one red. Motion rule: fields
+   evolve per frame (noise time), glyphs flip in place — nothing translates smoothly. */
+window.__ready = false;
+const COLS = 160, ROWS = 54, CW = 12, CH = 20;
+const RAMP = ' .·:-=+*o#%@';
+const INK = '#141414', RED = '#e0301e', FAINT = 'rgba(20,20,20,.14)';
+const ctx = document.getElementById('c').getContext('2d');
+
+// value-noise fbm, seeded
+let sd = 21; const rnd = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
+const P = Array.from({ length: 256 }, rnd);
+const h = (x, y) => P[(x * 73 + y * 151) & 255];
+function vn(x, y) { const X = Math.floor(x), Y = Math.floor(y), fx = x - X, fy = y - Y, s = t => t * t * (3 - 2 * t);
+  const a = h(X, Y), b = h(X + 1, Y), c = h(X, Y + 1), d = h(X + 1, Y + 1);
+  return a + (b - a) * s(fx) + (c - a) * s(fy) + (a - b - c + d) * s(fx) * s(fy); }
+const fbm = (x, y) => vn(x, y) * .5 + vn(x * 2, y * 2) * .25 + vn(x * 4, y * 4) * .125 + vn(x * 8, y * 8) * .0625;
+
+// scene in cell units (x: 0..160, y: 0..54, aspect corrected by CH/CW)
+const A = CH / CW;
+const L = norm([-0.6, -0.5, 0.62]);
+function norm(v) { const l = Math.hypot(...v); return v.map(q => q / l); }
+const cup = { cx: 118, top: 22, bot: 46, rt: 22, rb: 17 };
+function shade(x, y) {
+  // returns [density, colour] or null
+  // cherry sphere
+  const cx = 86, cy = 40, R = 9;
+  const px = (x - cx) / R, py = (y - cy) * A / R, rr = px * px + py * py;
+  if (rr < 1) { const n = [px, py, Math.sqrt(1 - rr)]; const d = Math.max(0, n[0] * L[0] + n[1] * L[1] + n[2] * L[2]);
+    return [0.25 + 0.75 * (1 - d), RED]; }
+  // stem
+  if (Math.abs(x - (87 + (34.6 - y) * 0.6)) < 0.7 && y > 29 && y < 35) return [0.8, INK];
+  // saucer
+  const sy = (y - 47.2) * A, sx = x - cup.cx;
+  if ((sx * sx) / (34 * 34) + (sy * sy) / (4.2 * 4.2) < 1) return [0.35 + 0.25 * (1 - Math.abs(sx) / 34), INK];
+  // body: tapered cylinder, lambert
+  if (y >= cup.top && y <= cup.bot) {
+    const t = (y - cup.top) / (cup.bot - cup.top), r = cup.rt + (cup.rb - cup.rt) * t;
+    const u = (x - cup.cx) / r;
+    if (Math.abs(u) <= 1) {
+      const n = [u, 0.15, Math.sqrt(1 - u * u)];
+      const d = Math.max(0, n[0] * L[0] + n[1] * L[1] + n[2] * L[2]);
+      return [0.12 + 0.88 * (1 - d), INK];   // light side = sparse glyphs, shadow side = dense
+    }
+  }
+  // coffee surface ellipse at rim
+  const ey = (y - cup.top) * A, ex = x - cup.cx;
+  if ((ex * ex) / (cup.rt * cup.rt) + (ey * ey) / (3.2 * 3.2) < 1) return [0.95, INK];
+  // handle ring
+  const hx = x - (cup.cx + cup.rt + 1), hy = (y - 31) * A * 0.62, hr = Math.hypot(hx, hy);
+  if (hx > -2 && hr > 5.2 && hr < 8.2) return [0.7, INK];
+  // steam: fbm plumes above the cup, fading with height
+  if (y < cup.top - 1 && y > 2 && Math.abs(x - cup.cx) < 24) {
+    const k = (cup.top - y) / cup.top;
+    const wob = Math.sin(y * 0.35) * 3;
+    let plume = 0;
+    [-9, 0, 9].forEach(o => { plume += Math.exp(-Math.pow((x - cup.cx - o - wob * (o ? 1 : -1)) / 2.6, 2)); });
+    const v = plume * fbm(x * 0.18, y * 0.3) * (1 - k) * 1.8;
+    if (v > 0.12) return [Math.min(0.7, v), INK];
+  }
+  return null;
+}
+
+async function main() {
+  await document.fonts.load('800 20px "JetBrains Mono"');
+  await document.fonts.load('400 20px "Archivo Black"');
+  // title mask at grid resolution
+  const tm = document.createElement('canvas'); tm.width = COLS; tm.height = ROWS;
+  const tc = tm.getContext('2d'); tc.fillStyle = '#000'; tc.textBaseline = 'alphabetic';
+  const sy = 0.78; tc.font = '16px "Archivo Black"'; tc.save(); tc.scale(1, sy);
+  tc.fillText('FROM', 5, 14 / sy); tc.fillText('CHERRY', 5, 28 / sy); tc.fillText('TO CUP', 5, 42 / sy);
+  console.log('title width', tc.measureText('CHERRY').width, tc.measureText('TO CUP').width);
+  tc.restore();
+  const tmask = tc.getImageData(0, 0, COLS, ROWS).data;
+
+  ctx.fillStyle = '#f1eee6'; ctx.fillRect(0, 0, 1920, 1080);
+  ctx.textBaseline = 'top'; ctx.font = '800 19px "JetBrains Mono"';
+  const caption = '> every coffee cherry holds 2 seeds. roast them -> beans._';
+  for (let r = 0; r < ROWS; r++) for (let q = 0; q < COLS; q++) {
+    const x = q + 0.5, y = r + 0.5;
+    let ch = null, col = INK;
+    const cov = tmask[(r * COLS + q) * 4 + 3] / 255;
+    if (r === 51 && q >= 4 && q - 4 < caption.length) { ch = caption[q - 4]; col = q - 4 >= caption.length - 1 ? RED : INK; }
+    else if (cov > 0.2) { ch = cov > 0.62 ? '#' : '+'; }
+    else {
+      const s = shade(x, y);
+      if (s) { const d = Math.max(0, Math.min(0.999, s[0] + (fbm(q * .7, r * .9) - .5) * .18)); ch = RAMP[Math.floor(d * RAMP.length)]; col = s[1]; }
+    }
+    if (ch === null || ch === ' ') { ch = (q + r) % 2 ? '·' : ' '; col = FAINT; }
+    ctx.fillStyle = col; ctx.fillText(ch, q * CW, r * CH);
+  }
+  window.__ready = true;
+}
+main();
+</script></body></html>

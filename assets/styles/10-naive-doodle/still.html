@@ -1,0 +1,151 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>html,body{margin:0;background:#fbf8f0}canvas{display:block}</style>
+<script src="https://cdn.jsdelivr.net/npm/p5@2.3.4/lib/p5.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/p5.brush@2.2.3/dist/p5.brush.js"></script>
+<script src="../../lib/hershey.js"></script>
+</head><body>
+<script>
+/* NAIVE DOODLE (v2) — a real kid's crayon drawing, not a vector with wobble. Everything is laid down
+   with p5.brush pigment strokes: crayon outlines that don't close, zig-zag colouring that misses
+   and overshoots the lines, a sky strip at the top and a white gap before the ground (the way kids
+   do it), letters drawn stroke by stroke from a single-stroke font with drifting size and baseline.
+   Motion rule: the line boils on twos (reseed jitter 12x/s); things bounce with big squash. */
+window.__ready = false;
+const W = 1920, H = 1080;
+let R; const rng = s => () => ((s = (s * 16807) % 2147483647) / 2147483647);
+const J = (a) => (R() * 2 - 1) * a;
+
+// crayon strokes with a slow hand wobble: resample the path, push each point along a drifting noise
+function wobble(pts, amp = 5, step = 14) {
+  const out = [];
+  let ph = R() * 100;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [x0, y0] = pts[i], [x1, y1] = pts[i + 1], L = Math.hypot(x1 - x0, y1 - y0), n = Math.max(1, Math.ceil(L / step));
+    for (let k = 0; k < n; k++) { const t = k / n; ph += 0.35; out.push([x0 + (x1 - x0) * t + Math.sin(ph) * amp + J(amp * 0.3), y0 + (y1 - y0) * t + Math.cos(ph * 0.8) * amp + J(amp * 0.3)]); }
+  }
+  out.push(pts[pts.length - 1]);
+  return out;
+}
+function crayonLine(pts, col, w = 1, br = 'crayon', amp = 4) {
+  if (pts.length < 2) return;
+  brush.noFill(); brush.noHatch(); brush.noWash(); brush.set(br, col, w);
+  brush.spline(wobble(pts, amp), 0.35);
+}
+const ell = (cx, cy, rx, ry, n = 40, a0 = 0, sweep = 1) => Array.from({ length: n + 1 }, (_, i) => { const a = a0 + i / n * Math.PI * 2 * sweep; return [cx + Math.cos(a) * rx, cy + Math.sin(a) * ry]; });
+// outline that doesn't quite close: starts late, overshoots a bit
+const kidOutline = (cx, cy, rx, ry, col, w = 1.2) => crayonLine(ell(cx, cy, rx * (1 + J(.05)), ry * (1 + J(.05)), 44, R() * 6, 1.04 + R() * 0.06), col, w);
+
+// zig-zag colouring inside a polygon: scanlines at an angle, ends that miss and overshoot
+function scribble(poly, col, gap = 16, ang = -0.5, w = 1.1, br = 'crayon', again = true) {
+  if (again && R() < 0.55) scribble(poly, col, gap * 2.2, ang + 0.35 + J(0.25), w * 0.85, br, false);
+  const c = Math.cos(ang), s = Math.sin(ang);
+  const rot = poly.map(([x, y]) => [x * c + y * s, -x * s + y * c]);
+  const ys = rot.map(p => p[1]), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const zig = [];
+  let flip = false;
+  for (let y = y0 + gap * 0.5; y < y1; y += gap * (0.7 + R() * 0.6)) {
+    const xs = [];
+    for (let i = 0; i < rot.length; i++) {
+      const [ax, ay] = rot[i], [bx, by] = rot[(i + 1) % rot.length];
+      if ((ay <= y && by > y) || (by <= y && ay > y)) xs.push(ax + (y - ay) / (by - ay) * (bx - ax));
+    }
+    if (xs.length < 2) continue;
+    xs.sort((a, b) => a - b);
+    let a = xs[0] + J(14) + 6, b = xs[xs.length - 1] + J(16) - 4;   // miss here, overshoot there
+    if (R() < 0.12) b -= (b - a) * 0.35;                            // got bored halfway
+    const pair = flip ? [[b, y], [a, y + gap * 0.4]] : [[a, y], [b, y + gap * 0.4]];
+    zig.push(...pair); flip = !flip;
+  }
+  const back = zig.map(([x, y]) => [x * c - y * s, x * s + y * c]);
+  brush.noFill(); brush.noHatch(); brush.noWash(); brush.set(br, col, w);
+  brush.spline(back, 0.15);
+}
+
+function letters(text, font, x, y, size, cols, opts = {}) {
+  const { polys } = hersheyPolys(text, font, x, y, size, { track: opts.track ?? 3 });
+  const per = {};
+  [...text].forEach((ch, i) => per[i] = { s: 0.88 + R() * 0.3, dy: J(16), r: J(0.12) });
+  polys.forEach(p => {
+    const t = per[p.i], xs = p.pts.map(q => q[0]), cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+    const pts = p.pts.map(([px, py]) => {
+      const dx = (px - cx) * t.s, dy = (py - y) * t.s;
+      return [cx + dx * Math.cos(t.r) - dy * Math.sin(t.r), y + t.dy + dx * Math.sin(t.r) + dy * Math.cos(t.r)];
+    });
+    crayonLine(pts, cols[p.i % cols.length], opts.w || 2.2, 'crayon', 2.2);
+  });
+}
+
+async function setup() {
+  createCanvas(W, H, WEBGL); pixelDensity(1); noLoop();
+  window.HERSHEY = await (await fetch('../../lib/hershey.json')).json();
+  brush.scaleBrushes(3.4);
+  brush.add('crayon', { type: 'default', weight: 5, scatter: 0.6, sharpness: 0.35, grain: 7, opacity: 205, spacing: 0.35, pressure: [1.15, 0.7], rotate: 'natural', noise: 0.55 });
+  brush.add('fatcrayon', { type: 'default', weight: 9, scatter: 1.2, sharpness: 0.25, grain: 5, opacity: 150, spacing: 0.45, pressure: [1, 0.7], rotate: 'natural', noise: 0.6 });
+  redraw();
+}
+
+function draw() {
+  R = rng(20260930);
+  randomSeed(7); noiseSeed(7);
+  translate(-W / 2, -H / 2);
+  background('#fbf8f0');
+  // paper tooth
+  noStroke(); for (let i = 0; i < 9000; i++) { fill(120, 100, 70, 10 + R() * 14); rect(R() * W, R() * H, 1 + R() * 2, 1); }
+
+  const BLUE = '#3f73d8', SKY = '#6aa6ee', GREEN = '#3aa23a', LEAF = '#2f8a3a', RED = '#e2342b', BROWN = '#7a4a24', YEL = '#ffc81e', ORA = '#ff8a1e', PINK = '#ff6fa3', INK = '#2b2233', GREY = '#8d96a3';
+
+  // sky strip across the top (with the white gap below it)
+  scribble([[-20, -20], [W + 20, -20], [W + 20, 120], [1400, 150], [700, 118], [-20, 150]], SKY, 20, -0.08, 1.6, 'fatcrayon', false);
+  // sun in the corner, smiling, rays that don't touch
+  scribble(ell(1740, 180, 105, 100, 30), YEL, 15, 0.7, 1.4, 'fatcrayon');
+  kidOutline(1740, 180, 105, 100, ORA, 1.4);
+  for (let i = 0; i < 11; i++) { const a = i / 11 * Math.PI * 2 + 0.2; crayonLine([[1740 + Math.cos(a) * 135, 180 + Math.sin(a) * 130], [1740 + Math.cos(a) * (200 + J(30)), 180 + Math.sin(a) * (195 + J(30))]], ORA, 1.3); }
+  scribble(ell(1705, 160, 9, 12, 10), INK, 4, 0.3, 1.2, 'crayon', false); scribble(ell(1772, 158, 9, 12, 10), INK, 4, 0.3, 1.2, 'crayon', false);
+  crayonLine(ell(1740, 190, 38, 30, 16, 0.4, 0.33), INK, 1.2);
+
+  // ground
+  scribble([[-20, 925], [500, 905], [1100, 930], [1600, 900], [W + 20, 915], [W + 20, H + 20], [-20, H + 20]], GREEN, 16, 0.1, 1.5, 'fatcrayon');
+  for (let x = 20; x < W; x += 36 + R() * 30) crayonLine([[x, 930 + J(10)], [x + 8 + J(4), 885 + J(12)], [x + 18, 930 + J(10)]], LEAF, 1);
+
+  // title, letter by letter, crayon colours swapping mid-word
+  letters('FROM CHERRY', 'futural', 130, 375, 172, [RED, BLUE, ORA, GREEN, PINK, BLUE]);
+  letters('TO CUP!', 'futural', 600, 575, 172, [BROWN, RED, BLUE]);
+
+  // coffee tree
+  scribble([[250, 930], [240, 700], [300, 690], [300, 930]], BROWN, 12, 0.2, 1.3);
+  crayonLine([[245, 930], [238, 690]], BROWN, 1.3); crayonLine([[300, 935], [304, 695]], BROWN, 1.3);
+  const crown = [];
+  for (let i = 0; i <= 14; i++) { const a = i / 14 * Math.PI * 2, rr = 190 + (i % 2 ? 40 : 0) + J(15); crown.push([275 + Math.cos(a) * rr * 1.1, 600 + Math.sin(a) * rr * 0.72]); }
+  scribble(crown, GREEN, 18, 0.6, 1.4, 'fatcrayon');
+  crayonLine(crown, LEAF, 1.2);
+  [[170, 560], [230, 640], [340, 560], [390, 650], [290, 700], [150, 680], [420, 590], [260, 520]].forEach(([x, y]) => {
+    scribble(ell(x, y, 26, 26, 16), RED, 9, R(), 1.1); kidOutline(x, y, 26, 26, RED, 1);
+  });
+
+  // "2 SEEDS!!" : a cherry cut open, big, with the two seeds and an arrow from the tree
+  scribble(ell(870, 800, 118, 105, 30), RED, 14, -0.3, 1.2);
+  scribble(ell(870, 800, 80, 70, 24), '#ffe7a3', 13, 0.9, 1.2);
+  kidOutline(870, 800, 120, 107, INK, 1.4);
+  [[838, 800], [902, 800]].forEach(([x, y], k) => {
+    scribble(ell(x, y, 28, 46, 18), '#a7d36a', 9, 1.2, 1.1); kidOutline(x, y, 28, 46, INK, 1.1);
+    crayonLine([[x + J(3), y - 34], [x + 8, y - 8], [x - 6, y + 12], [x + 2, y + 36]], INK, 0.9);
+    scribble(ell(x - 10, y - 14, 5, 6, 8), INK, 3, 0.3, 1, 'crayon', false); scribble(ell(x + 10, y - 14, 5, 6, 8), INK, 3, 0.3, 1, 'crayon', false);
+  });
+  crayonLine([[470, 700], [560, 760], [690, 780]], INK, 1.3); crayonLine([[660, 755], [700, 782], [662, 808]], INK, 1.3);
+  letters('2 SEEDS!!', 'futural', 720, 670, 62, [INK], { track: 5, w: 1.6 });
+
+  // big mug with steam
+  const mug = [[1330, 610], [1640, 610], [1615, 900], [1360, 900]];
+  scribble(mug, '#56b4ff', 17, -0.8, 1.4, 'fatcrayon');
+  crayonLine([...mug, [1335, 615]], INK, 1.5);
+  crayonLine(ell(1665, 740, 70, 85, 26, -1.4, 0.5), INK, 1.5);
+  scribble(ell(1485, 615, 150, 22, 18), BROWN, 8, 0, 1.2);
+  [1410, 1490, 1570].forEach(x => crayonLine([[x, 575], [x - 20, 530], [x + 20, 485], [x - 12, 440]], GREY, 1.1));
+  scribble(ell(1458, 735, 10, 14, 10), INK, 4, 0.3, 1.2, 'crayon', false); scribble(ell(1525, 735, 10, 14, 10), INK, 4, 0.3, 1.2, 'crayon', false);
+  crayonLine(ell(1492, 770, 40, 30, 14, 0.3, 0.36), INK, 1.3);
+  crayonLine([[1180, 730], [1290, 720]], INK, 1.3); crayonLine([[1265, 698], [1295, 720], [1262, 745]], INK, 1.3);
+  window.__ready = true;
+}
+</script>
+</body></html>

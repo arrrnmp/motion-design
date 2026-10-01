@@ -1,0 +1,565 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>From Cherry to Cup</title>
+<meta name="description" content="A coffee cherry holds two seeds. Scroll to follow them to the cup — drawn entirely in characters.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;800&family=Archivo+Black&family=Big+Shoulders+Display:wght@900&display=block" rel="stylesheet">
+<style>
+/* CODED ASCII — the whole site is one glyph grid. Objects are procedural fields quantised to a
+   character ramp; silhouettes pick line glyphs by edge direction; chapters dissolve through an
+   8x8 Bayer matrix; the pointer heats the field and a click stamps a bean. Themes are tokens. */
+:root{--bg:#f1eee6;--ink:#141414;--accent:#e0301e}
+*{box-sizing:border-box;margin:0}
+html{scroll-behavior:auto}
+body{background:var(--bg);color:var(--ink);font-family:"JetBrains Mono",ui-monospace,monospace;transition:background .3s}
+canvas#field{position:fixed;inset:0;width:100vw;height:100vh;display:block;cursor:crosshair}
+.chapters section{height:100vh}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+header{position:fixed;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:center;padding:14px 18px;font-size:13px;font-weight:800;letter-spacing:.04em;pointer-events:none;z-index:2}
+header button,nav button{pointer-events:auto;font:inherit;color:var(--ink);background:var(--bg);border:1.5px solid var(--ink);padding:5px 10px;cursor:pointer}
+header button:hover,nav button:hover,nav button[aria-current="true"]{background:var(--ink);color:var(--bg)}
+header .ctl{display:flex;gap:8px}
+header .brand{background:var(--bg);padding:5px 8px}
+header .brand b{color:var(--accent)}
+nav{position:fixed;right:18px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:8px;z-index:2}
+nav button{width:34px;padding:4px 0;font-size:12px}
+@media (max-width:700px){nav{display:none}header{font-size:11px}}
+</style>
+</head>
+<body>
+<canvas id="field" aria-hidden="true"></canvas>
+<header>
+  <span class="brand">cherry<b>→</b>cup</span>
+  <span class="ctl"><button id="soundBtn" type="button" title="Music on/off (M)" aria-pressed="false">[M] sound: off</button> <button id="themeBtn" type="button" title="Change theme (T)">[T] theme: paper</button></span>
+</header>
+<nav aria-label="Chapters"></nav>
+<main class="chapters">
+  <section id="c0"><h1 class="sr">From cherry to cup</h1><p class="sr">Every coffee cherry holds two seeds. Scroll to follow them to the cup.</p></section>
+  <section id="c1"><h2 class="sr">01 — The cherry</h2><p class="sr">A coffee cherry is a fruit. Split one open and you will usually find two seeds, flat faces pressed together.</p></section>
+  <section id="c2"><h2 class="sr">02 — The seed</h2><p class="sr">Pulped, washed and dried in the sun, the seeds become green coffee.</p></section>
+  <section id="c3"><h2 class="sr">03 — The roast</h2><p class="sr">Heat turns them brown. Around first crack they pop, loud enough to hear.</p></section>
+  <section id="c4"><h2 class="sr">04 — The grind</h2><p class="sr">Ground just before brewing, so the aroma stays in the cup.</p></section>
+  <section id="c5"><h2 class="sr">05 — The cup</h2><p class="sr">Espresso: hot water pushed through the grounds at about 9 bar.</p></section>
+</main>
+<script>
+(() => {
+'use strict';
+// ---------------------------------------------------------------- themes
+const THEMES = [
+  { name: 'paper',   bg: '#f1eee6', ink: '#141414', accent: '#e0301e', faint: 'rgba(20,20,20,.13)', inv: false },
+  { name: 'riso',    bg: '#f3f0e8', ink: '#3255a4', accent: '#ff48b0', faint: 'rgba(50,85,164,.16)', inv: false },
+  { name: 'linocut', bg: '#ece4d4', ink: '#1b1714', accent: '#c8322a', faint: 'rgba(27,23,20,.14)', inv: false },
+  { name: 'night',   bg: '#15110e', ink: '#efe6d6', accent: '#ff5a1f', faint: 'rgba(239,230,214,.09)', inv: true },
+];
+let themeIdx = 0;
+try { themeIdx = Math.max(0, THEMES.findIndex(t => t.name === localStorage.getItem('c2c-theme'))); } catch (e) {}
+const theme = () => THEMES[themeIdx];
+
+// ---------------------------------------------------------------- constants
+const RAMP = ' .·:-=+*o#%@';
+const BAYER = [0,32,8,40,2,34,10,42,48,16,56,24,50,18,58,26,12,44,4,36,14,46,6,38,60,28,52,20,62,30,54,22,
+  3,35,11,43,1,33,9,41,51,19,59,27,49,17,57,25,15,47,7,39,13,45,5,37,63,31,55,23,61,29,53,21];
+const bayer = (c, r) => BAYER[(r & 7) * 8 + (c & 7)] / 64;
+const INK = 0, ACC = 1, FAINT = 2;
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// ---------------------------------------------------------------- noise
+const P = new Float32Array(512);
+{ let s = 21; for (let i = 0; i < 512; i++) P[i] = (s = (s * 16807) % 2147483647) / 2147483647; }
+const hash = (x, y) => P[((x * 73 + y * 151) & 511 + 512) & 511];
+const hash1 = i => P[(i * 97 + 13) & 511];
+function vn(x, y) {
+  const X = Math.floor(x), Y = Math.floor(y), fx = x - X, fy = y - Y, sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+  const a = hash(X, Y), b = hash(X + 1, Y), c = hash(X, Y + 1), d = hash(X + 1, Y + 1);
+  return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
+}
+const fbm = (x, y) => vn(x, y) * .5 + vn(x * 2.03, y * 2.03) * .25 + vn(x * 4.1, y * 4.1) * .125 + vn(x * 8.3, y * 8.3) * .0625;
+const clamp = (v, a = 0, b = 1) => v < a ? a : v > b ? b : v;
+const smooth = (a, b, v) => { const t = clamp((v - a) / (b - a)); return t * t * (3 - 2 * t); };
+
+// ---------------------------------------------------------------- canvas + atlas
+const cv = document.getElementById('field'), ctx = cv.getContext('2d');
+let dpr = 1, CW = 10, CH = 18, COLS = 0, ROWS = 0, FS = 16, ASP = 1, WIDE = true;
+let atlas, dens, colr, chars, titleMask, titleCols, titleRows;
+const GLYPHS = [];
+for (let c = 32; c < 127; c++) GLYPHS.push(String.fromCharCode(c));
+GLYPHS.push('·', '→', '↻', '█');
+const GI = new Map(GLYPHS.map((g, i) => [g, i]));
+
+function buildAtlas() {
+  const t = theme();
+  atlas = document.createElement('canvas');
+  atlas.width = Math.ceil(GLYPHS.length * CW * dpr); atlas.height = Math.ceil(3 * CH * dpr);
+  const a = atlas.getContext('2d');
+  a.scale(dpr, dpr); a.textBaseline = 'middle'; a.textAlign = 'center';
+  [t.ink, t.accent, t.faint].forEach((col, k) => {
+    a.fillStyle = col; a.font = `800 ${FS}px "JetBrains Mono", monospace`;
+    GLYPHS.forEach((g, i) => a.fillText(g, i * CW + CW / 2, k * CH + CH / 2 + 1));
+  });
+  document.documentElement.style.setProperty('--bg', t.bg);
+  document.documentElement.style.setProperty('--ink', t.ink);
+  document.documentElement.style.setProperty('--accent', t.accent);
+  themeBtn.textContent = `[T] theme: ${t.name}`;
+}
+
+function layout() {
+  dpr = Math.min(2, devicePixelRatio || 1);
+  const w = innerWidth, h = innerHeight;
+  FS = w < 520 ? 11 : w < 900 ? 13 : w < 1500 ? 15 : 17;
+  ctx.font = `800 ${FS}px "JetBrains Mono", monospace`;
+  CW = Math.round(ctx.measureText('M').width); CH = Math.round(FS * 1.2);
+  COLS = Math.ceil(w / CW); ROWS = Math.ceil(h / CH);
+  ASP = (COLS * CW) / (ROWS * CH); WIDE = ASP > 1.15;
+  cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  dens = new Float32Array(COLS * ROWS); colr = new Uint8Array(COLS * ROWS); chars = new Int16Array(COLS * ROWS);
+  buildTitle();
+  buildAtlas();
+}
+
+// title rasterised into the grid (cell space, corrected for cell aspect)
+let nounMasks = [];
+function capBox() {
+  return WIDE ? { c: Math.floor(COLS * 0.6), top: Math.floor(ROWS * 0.16), w: Math.floor(COLS * 0.33) }
+              : { c: 2, top: Math.floor(ROWS * 0.06), w: COLS - 4 };
+}
+function buildNouns() {
+  const box = capBox(), k = CW / CH;
+  nounMasks = NOUNS.map(n => {
+    if (!n) return null;
+    const c = document.createElement('canvas'); c.width = COLS; c.height = ROWS;
+    const g = c.getContext('2d'); g.font = '900 100px "Big Shoulders Display"';
+    const fs = Math.min(box.w / g.measureText(n).width * 100, ROWS * 0.3 / k / 0.72);
+    g.save(); g.scale(1, k); g.font = `900 ${fs}px "Big Shoulders Display"`; g.textBaseline = 'top';
+    g.fillText(n, box.c, (box.top + 2) / k); g.restore();
+    const d = g.getImageData(0, 0, COLS, ROWS).data, m = new Float32Array(COLS * ROWS);
+    let bottom = 0;
+    for (let i = 0; i < COLS * ROWS; i++) { m[i] = d[i * 4 + 3] / 255; if (m[i] > 0.3) bottom = Math.max(bottom, Math.floor(i / COLS)); }
+    m.bottom = bottom; return m;
+  });
+}
+function buildTitle() {
+  buildNouns();
+  titleCols = COLS; titleRows = ROWS;
+  const c = document.createElement('canvas'); c.width = COLS; c.height = ROWS;
+  const g = c.getContext('2d'); g.fillStyle = '#000';
+  const boxW = WIDE ? COLS * 0.5 : COLS * 0.86, x0 = WIDE ? Math.max(3, COLS * 0.05) : COLS * 0.07;
+  g.font = '100px "Archivo Black"';
+  const wide = g.measureText('CHERRY').width;
+  const fs = boxW / wide * 100, k = CW / CH, lh = fs * 0.86;
+  const top = WIDE ? ROWS * 0.12 : ROWS * 0.1;
+  g.save(); g.scale(1, k); g.font = `${fs}px "Archivo Black"`; g.textBaseline = 'top';
+  ['FROM', 'CHERRY', 'TO CUP'].forEach((s, i) => g.fillText(s, x0, top / k + i * lh));
+  g.restore();
+  const d = g.getImageData(0, 0, COLS, ROWS).data;
+  titleMask = new Float32Array(COLS * ROWS);
+  for (let i = 0; i < COLS * ROWS; i++) titleMask[i] = d[i * 4 + 3] / 255;
+}
+
+// ---------------------------------------------------------------- shading helpers (screen units: height = 1)
+let L = [-0.6, -0.5, 0.62];
+const norm3 = v => { const l = Math.hypot(v[0], v[1], v[2]); return [v[0] / l, v[1] / l, v[2] / l]; };
+const shade = l => theme().inv ? 0.14 + 0.86 * l : 0.14 + 0.86 * (1 - l);
+function sphereL(X, Y, cx, cy, r) {
+  const px = (X - cx) / r, py = (Y - cy) / r, rr = px * px + py * py;
+  if (rr > 1) return -1;
+  const nz = Math.sqrt(1 - rr);
+  return Math.max(0, px * L[0] + py * L[1] + nz * L[2]);
+}
+// a coffee bean: ellipse with an S-shaped crease; -1 outside, -2 inside the crease
+function beanL(X, Y, cx, cy, a, b, rot, crease = true) {
+  const dx = X - cx, dy = Y - cy, c = Math.cos(rot), s = Math.sin(rot);
+  const u = (dx * c + dy * s) / a, v = (-dx * s + dy * c) / b, rr = u * u + v * v;
+  if (rr > 1) return -1;
+  if (crease && Math.abs(u - 0.2 * Math.sin(v * 3.3)) < 0.14 && Math.abs(v) < 0.86) return -2;
+  const nz = Math.sqrt(1 - rr), nx = u * c - v * s, ny = u * s + v * c;
+  return Math.max(0, nx * L[0] + ny * L[1] + nz * L[2]);
+}
+
+// ---------------------------------------------------------------- chapters
+// each: (X, Y, c, r, t, q) -> writes O.d (0..1) and O.c (colour)
+const O = { d: 0, c: INK };
+const OBJX = () => WIDE ? -ASP * 0.17 : 0;
+const cupAt = () => WIDE ? [ASP * 0.2, 0.06, 0.2] : [0.06, 0.3, 0.13];
+
+function steam(X, Y, cx, top, t, spread, amt) {
+  if (Y > top || Y < top - 0.34) return 0;
+  const k = (top - Y) / 0.34, wob = Math.sin(Y * 14 + t * 1.3) * 0.02;
+  let plume = 0;
+  for (const o of [-1, 0, 1]) { const px = cx + o * spread + wob * (o ? o : -1) + Math.sin(Y * 9 - t * 1.7 + o * 2) * 0.012; plume += Math.exp(-Math.pow((X - px) / 0.022, 2)); }
+  return plume * fbm(X * 22, Y * 16 + t * 1.6) * (1 - k) * 1.5 * amt;
+}
+let coffeeCol = INK;
+function cup(X, Y, cx, cy, s, t, fill, steamAmt) {
+  const top = cy - s * 0.55, bot = cy + s * 0.55, rt = s * 0.62, rb = s * 0.48;
+  // saucer
+  const sx = (X - cx) / (s * 1.05), sy = (Y - (bot + s * 0.06)) / (s * 0.1);
+  if (sx * sx + sy * sy < 1) { O.d = shade(0.55 - sx * 0.3); O.c = INK; return true; }
+  if (Y >= top && Y <= bot) {
+    const k = (Y - top) / (bot - top), r = rt + (rb - rt) * k, u = (X - cx) / r;
+    if (Math.abs(u) <= 1) { const nz = Math.sqrt(1 - u * u); O.d = shade(Math.max(0, u * L[0] + 0.1 * L[1] + nz * L[2])); O.c = INK; return true; }
+  }
+  // coffee surface at the fill level
+  const lev = top + (1 - fill) * (bot - top - s * 0.1), rl = rt + (rb - rt) * ((lev - top) / (bot - top));
+  const ex = (X - cx) / rl, ey = (Y - lev) / (s * 0.09);
+  if (fill > 0.02 && ex * ex + ey * ey < 1) { O.d = 0.93; O.c = coffeeCol; return true; }
+  const rx = (X - cx) / rt, ry = (Y - top) / (s * 0.09);
+  if (rx * rx + ry * ry < 1 && Math.abs(rx * rx + ry * ry - 0.8) < 0.2) { O.d = 0.6; O.c = INK; return true; }
+  // handle
+  const hx = X - (cx + rt * 0.95), hy = (Y - (cy - s * 0.12)) * 1.3, hr = Math.hypot(hx, hy);
+  if (hx > -0.01 && hr > s * 0.17 && hr < s * 0.27) { O.d = 0.7; O.c = INK; return true; }
+  const st = steam(X, Y, cx, top - s * 0.05, t, s * 0.28, steamAmt);
+  if (st > 0.13) { O.d = Math.min(0.62, st); O.c = INK; return true; }
+  return false;
+}
+
+const CH0 = function hero(X, Y, c, r, t, q) {
+  const tm = titleMask[r * COLS + c];
+  if (tm > 0.25) { O.d = tm > 0.6 ? 0.82 : 0.5; O.c = INK; return; }
+  const [cx, cy, s] = cupAt();
+  // the cherry at the foot of the cup
+  const chx = cx - s * 1.35, chy = cy + s * 0.2, R = s * 0.42;
+  const l = sphereL(X, Y, chx, chy, R);
+  if (l >= 0) { O.d = shade(l); O.c = ACC; return; }
+  if (Math.abs(X - (chx + (chy - R - Y) * 0.45)) < 0.006 && Y < chy - R + 0.01 && Y > chy - R - s * 0.3) { O.d = 0.8; O.c = INK; return; }
+  if (cup(X, Y, cx, cy, s, t, 1, 1)) return;
+  O.d = 0;
+};
+
+const CH1 = function cherry(X, Y, c, r, t, q) {
+  const cx = OBJX(), cy = WIDE ? 0.04 : -0.02, R = WIDE ? 0.29 : 0.22;
+  const split = smooth(0.25, 0.75, q) * R * 0.55;
+  // halves
+  const lh = X <= cx - split ? sphereL(X, Y, cx - split, cy, R) : -1;
+  const rh = X >= cx + split ? sphereL(X, Y, cx + split, cy, R) : -1;
+  // flesh visible at the cut once split: a thin light band on the inner edge
+  if (lh >= 0 || rh >= 0) {
+    const edge = lh >= 0 ? (cx - split) - X : X - (cx + split);
+    if (split > 0.01 && edge < 0.028) { O.d = 0.3; O.c = ACC; return; }
+    O.d = shade(lh >= 0 ? lh : rh); O.c = ACC; return;
+  }
+  // two seeds, flat faces together, growing into the gap
+  const g = smooth(0.2, 0.7, q);
+  if (g > 0.01) {
+    for (const sgn of [-1, 1]) {
+      const b = beanL(X, Y, cx + sgn * R * 0.19 * g, cy, R * 0.2 * g, R * 0.58 * g, 0, true);
+      if (b !== -1) { O.d = b === -2 ? 0 : shade(b); O.c = INK; return; }
+    }
+  }
+  // stem + leaf
+  if (Math.abs(X - (cx + (cy - R - Y) * 0.3)) < 0.006 && Y < cy - R + 0.01 && Y > cy - R - 0.12) { O.d = 0.85; O.c = INK; return; }
+  O.d = 0;
+};
+
+const CH2 = function patio(X, Y, c, r, t, q) {
+  // drying bed seen from above: a grid of seeds; a rake sweeps across and turns them over
+  const x0 = WIDE ? -ASP * 0.47 : -ASP * 0.46, x1 = WIDE ? ASP * 0.06 : ASP * 0.46, y0 = -0.36, y1 = 0.4;
+  // sun, low in the corner
+  const sl = sphereL(X, Y, x0 + 0.02, y0 - 0.02, 0.14);
+  if (sl >= 0) { O.d = 0.35 + 0.5 * sl; O.c = ACC; return; }
+  if (X < x0 || X > x1 || Y < y0 || Y > y1) { O.d = 0; return; }
+  // bed frame
+  if (X - x0 < 0.008 || x1 - X < 0.008 || Y - y0 < 0.012 || y1 - Y < 0.012) { O.d = 0.75; O.c = INK; return; }
+  const rakeX = x0 + (x1 - x0) * (0.1 + 0.8 * smooth(0.05, 0.95, q)) + 0.012 * Math.sin(t * 1.4);
+  if (Math.abs(X - rakeX) < 0.007) { O.d = 0.85; O.c = ACC; return; }
+  const sp = 0.2, gx = Math.floor((X - x0) / sp), gy = Math.floor((Y - y0) / (sp * 0.95));
+  const bx = x0 + (gx + 0.5) * sp + (hash(gx, gy) - 0.5) * 0.04, by = y0 + (gy + 0.5) * sp * 0.95 + (hash(gy, gx) - 0.5) * 0.03;
+  const turned = bx < rakeX;
+  const rot = hash(gx * 3 + 1, gy * 7) * 0.8 - 0.4 + (turned ? 1.57 : 0);
+  const b = beanL(X, Y, bx, by, 0.055, 0.08, rot, turned);
+  if (b >= 0) { O.d = shade(b) * (turned ? 1 : 0.78); O.c = INK; return; }
+  if (b === -2) { O.d = 0.05; O.c = INK; return; }
+  O.d = 0;
+};
+
+const CH3 = function roast(X, Y, c, r, t, q) {
+  const cx = OBJX(), cy = WIDE ? -0.02 : -0.06, R = WIDE ? 0.38 : 0.3;
+  const Xs = reduced ? X : X + 0.004 * Math.sin(Y * 70 + t * 9);           // heat shimmer
+  const dx = Xs - cx, dy = Y - cy, rr = Math.hypot(dx, dy), ang = Math.atan2(dy, dx);
+  // drum wall + rotating vanes
+  if (rr > R && rr < R * 1.07) { O.d = 0.78; O.c = INK; return; }
+  const va = ang - t * 1.1;
+  if (rr < R && rr > R * 0.82 && Math.abs(Math.sin(va * 3)) < 0.05) { O.d = 0.55; O.c = INK; return; }
+  // flames under the drum
+  if (Y > cy + R * 1.12 && Y < cy + R * 1.55 && Math.abs(X - cx) < R * 0.9) {
+    const f = fbm(X * 18, Y * 10 + t * 3.2) * (1 - (Y - cy - R * 1.12) / (R * 0.43)) * (1 - Math.abs(X - cx) / (R * 0.9));
+    if (f > 0.14) { O.d = Math.min(0.9, f * 2.2); O.c = ACC; return; }
+  }
+  if (rr < R) {
+    // tumbling beans, darkening with the roast (q)
+    for (let i = 0; i < 5; i++) {
+      const ph = hash1(i) * 6.28, sp = 0.7 + hash1(i + 40) * 0.6;
+      const a = Math.PI / 2 + Math.sin(t * sp * 0.8 + ph) * 0.5 + (i - 2) * 0.45;
+      const rad = R * (0.5 + hash1(i + 9) * 0.15);
+      const bx = cx + Math.cos(a) * rad, by = cy + Math.sin(a) * rad * 0.85 - Math.abs(Math.sin(t * sp * 1.7 + ph)) * R * 0.25;
+      const b = beanL(Xs, Y, bx, by, R * 0.19, R * 0.29, t * sp * 2 + ph);
+      if (b !== -1) { O.d = b === -2 ? 0.04 : clamp(shade(b) * (0.35 + 0.75 * q)); O.c = INK; return; }
+    }
+    O.d = 0; return;
+  }
+  O.d = 0;
+};
+// first-crack bursts: stamped as '*' particles in the accent colour
+function crackParticles(t, q, gate) {
+  if (q < 0.45) return;
+  const cx = OBJX(), cy = WIDE ? -0.02 : -0.06, R = WIDE ? 0.34 : 0.3;
+  for (let k = 0; k < 7; k++) {
+    const period = 1.4, tt = t + hash1(k + 70) * period, n = Math.floor(tt / period), age = (tt % period) / period;
+    if (age > 0.6) continue;
+    const bx = cx + (hash1(n * 7 + k) - 0.5) * R * 1.1, by = cy + hash1(n * 5 + k + 3) * R * 0.5;
+    for (let j = 0; j < 8; j++) {
+      const a = j / 8 * 6.28 + k, dist = age * R * 0.5;
+      stampCell(bx + Math.cos(a) * dist, by + Math.sin(a) * dist * 0.9, '*', ACC, gate);
+    }
+  }
+}
+
+const CH4 = function grind(X, Y, c, r, t, q) {
+  const cx = OBJX();
+  // hopper
+  const top = -0.42, neck = -0.16, w0 = 0.2, w1 = 0.05;
+  if (Y > top && Y < neck) {
+    const k = (Y - top) / (neck - top), hw = w0 + (w1 - w0) * k, e = Math.abs(X - cx);
+    if (Math.abs(e - hw) < 0.009) { O.d = 0.8; O.c = INK; return; }
+    if (e < hw && Y > top + 0.07 * (1 - q)) {   // beans inside, level sinking as they grind
+      const gx = Math.floor((X - cx) / 0.05), gy = Math.floor((Y + t * 0.03) / 0.05);
+      const b = beanL(X - cx - (gx + 0.5) * 0.05, (Y + t * 0.03) - (gy + 0.5) * 0.05, 0, 0, 0.017, 0.024, hash(gx, gy) * 6.28, false);
+      if (b >= 0) { O.d = shade(b) * 0.95; O.c = INK; return; }
+    }
+  }
+  // burr housing with turning teeth
+  if (Y >= neck && Y < neck + 0.1 && Math.abs(X - cx) < 0.13) {
+    const edge = Math.abs(X - cx) > 0.12 || Y < neck + 0.008 || Y > neck + 0.092;
+    if (edge) { O.d = 0.85; O.c = INK; return; }
+    O.d = (((X * 60 + t * 6) % 2 + 2) % 2) < 1 ? 0.6 : 0.25; O.c = INK; return;
+  }
+  // the pile of grounds, growing
+  const floor = 0.4, ph = 0.08 + 0.16 * q, e = Math.abs(X - cx) / (0.3 + 0.2 * q);
+  if (Y > floor - ph * (1 - e) && Y < floor && e < 1) { O.d = 0.55 + 0.35 * fbm(X * 50, Y * 50); O.c = INK; return; }
+  if (Y >= floor && Y < floor + 0.008 && Math.abs(X - cx) < 0.6) { O.d = 0.5; O.c = INK; return; }
+  O.d = 0;
+};
+function grindParticles(t, q, gate) {
+  const cx = OBJX(), y0 = -0.06, floor = 0.4 - (0.08 + 0.16 * q);
+  for (let i = 0; i < 90; i++) {
+    const T = 0.9, tt = (t + hash1(i) * T) % T, fall = y0 + 1.3 * tt * tt;
+    if (fall > floor + 0.02) continue;
+    stampCell(cx + (hash1(i + 200) - 0.5) * (0.04 + tt * 0.08), fall, hash1(i + 400) > 0.6 ? ':' : '.', INK, gate);
+  }
+}
+
+const CH5 = function brew(X, Y, c, r, t, q) {
+  const cx = OBJX(), cy = 0.14, s = WIDE ? 0.24 : 0.2;
+  // portafilter above the cup
+  const pY = -0.36;
+  if (Y > pY - 0.04 && Y < pY + 0.03 && Math.abs(X - cx) < s * 0.7) { O.d = Y > pY + 0.02 || Y < pY - 0.03 ? 0.85 : 0.62; O.c = INK; return; }
+  if (Y > pY - 0.025 && Y < pY + 0.012 && X > cx + s * 0.7 && X < cx + s * 2.2) { O.d = 0.7; O.c = INK; return; }
+  // the pour: two thin streams while filling
+  const pour = q < 0.85;
+  const lev = cy - s * 0.62;
+  if (pour && Y > pY + 0.03 && Y < lev) for (const o of [-1, 1]) {
+    const sx = cx + o * s * 0.08 + Math.sin(Y * 40 + t * 12) * 0.002;
+    if (Math.abs(X - sx) < 0.0055) { O.d = 0.9; O.c = ACC; return; }
+  }
+  coffeeCol = ACC; const hit = cup(X, Y, cx, cy, s, t, clamp(q * 1.1), smooth(0.6, 1, q)); coffeeCol = INK;
+  if (hit) return;
+  O.d = 0;
+};
+
+const NOUNS = [null, 'CHERRY', 'SEED', 'ROAST', 'GRIND', 'CUP'];
+const CHAPTERS = [
+  { f: CH0, lines: [] },
+  { f: CH1, n: '01', title: 'THE CHERRY', lines: ['A coffee cherry is a fruit.', 'Split one open and you usually', 'find two seeds, flat faces', 'pressed together.'] },
+  { f: CH2, n: '02', title: 'THE SEED', lines: ['Pulped, washed, then dried', 'in the sun: the seeds become', 'green coffee.'] },
+  { f: CH3, n: '03', title: 'THE ROAST', lines: ['Heat turns them brown.', 'Around first crack they pop,', 'loud enough to hear.'], fx: crackParticles },
+  { f: CH4, n: '04', title: 'THE GRIND', lines: ['Ground just before brewing,', 'so the aroma stays', 'for the cup.'], fx: grindParticles },
+  { f: CH5, n: '05', title: 'THE CUP', lines: ['Espresso: hot water pushed', 'through the grounds at', 'about 9 bar.', '', '↻ scroll up to brew again'] },
+];
+
+// ---------------------------------------------------------------- stamping (particles, pointer, clicks, text)
+let stampGate = null;
+function stampCell(X, Y, ch, col, gate) {
+  const c = Math.floor(X * ROWS * CH / CW + COLS / 2), r = Math.floor(Y * ROWS + ROWS / 2);
+  if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return;
+  const i = r * COLS + c;
+  if (gate && !gate(c, r)) return;
+  chars[i] = GI.get(ch); colr[i] = col;
+}
+function write(str, c0, r0, col, reveal = 1e9) {
+  for (let k = 0; k < str.length && k < reveal; k++) {
+    const c = c0 + k; if (c < 0 || c >= COLS || r0 < 0 || r0 >= ROWS) continue;
+    const i = r0 * COLS + c, g = GI.get(str[k]);
+    chars[i] = g === undefined ? 0 : g; colr[i] = col;
+  }
+}
+const BEAN_BITMAP = ['..###..', '.#####.', '###.###', '##.####', '##.####', '###.###', '###.###', '####.##', '####.##', '###.###', '.#####.', '..###..'];
+const pings = [];
+let pointer = { c: -99, r: -99, on: false };
+
+// ---------------------------------------------------------------- frame
+const EDGE = ['|', '/', '-', '\\'];
+let t0 = performance.now();
+function frame(now) {
+  const t = (now - t0) / 1000 * (reduced ? 0.25 : 1);
+  const maxS = Math.max(1, document.documentElement.scrollHeight - innerHeight);
+  const p = clamp(scrollY / maxS * (CHAPTERS.length - 0.35), 0, CHAPTERS.length - 0.0001);
+  const k = Math.floor(p), q = p - k;
+  const cur = CHAPTERS[k], next = CHAPTERS[Math.min(k + 1, CHAPTERS.length - 1)];
+  const mix = k < CHAPTERS.length - 1 ? smooth(0.8, 1, q) : 0;
+  L = norm3([-0.6 + 0.35 * Math.sin(t * 0.4), -0.5, 0.62]);
+  const toY = ROWS * CH, sX = CW / toY;
+
+  // 1. fields
+  chars.fill(-1);
+  for (let r = 0; r < ROWS; r++) {
+    const Y = (r + 0.5 - ROWS / 2) / ROWS;
+    for (let c = 0; c < COLS; c++) {
+      const X = (c + 0.5 - COLS / 2) * sX, i = r * COLS + c;
+      const useNext = mix > 0 && bayer(c, r) < mix;
+      (useNext ? next.f : cur.f)(X, Y, c, r, t, useNext ? 0 : q);
+      dens[i] = O.d; colr[i] = O.c;
+    }
+  }
+  // 2. particles for the active chapter(s)
+  if (cur.fx) cur.fx(t, q, mix > 0 ? (c, r) => bayer(c, r) >= mix : null);
+  if (mix > 0 && next.fx) next.fx(t, 0, (c, r) => bayer(c, r) < mix);
+
+  // 3. captions typed into the grid
+  const capC = WIDE ? Math.max(3, Math.floor(COLS * 0.05)) : 2;
+  if (k === 0) {
+    const s = '> every coffee cherry holds 2 seeds. scroll to brew';
+    const rr = WIDE ? Math.floor(ROWS * 0.8) : ROWS - 5;
+    write(s.slice(0, Math.min(s.length, Math.floor(t * 28))), capC, rr, INK);
+    if ((t * 2 | 0) % 2 && t * 28 > s.length) write('_', capC + s.length, rr, ACC);
+    write('↓', capC, rr + 2, ACC);
+    window.__c2c = { t, p, k, q, mix, theme: themeIdx, chars: Math.min(s.length, Math.floor(t * 28)), pings: pings.length };
+  } else {
+    const typed = Math.floor(smooth(0.08, 0.5, q) * 300), box = capBox(), nm = nounMasks[k];
+    const rr = WIDE ? nm.bottom + 3 : ROWS - cur.lines.length - 3, cc = box.c;
+    const bw = Math.max(box.w, ...cur.lines.map(l => l.length));
+    const clearRows = WIDE ? [[box.top - 1, rr + cur.lines.length + 1]] : [[box.top - 1, nm.bottom + 1], [rr - 2, rr + cur.lines.length + 1]];
+    for (const [r0, r1] of clearRows) for (let r = r0; r <= r1; r++) for (let c = cc - 2; c <= cc + bw + 2; c++)
+      if (c >= 0 && r >= 0 && c < COLS && r < ROWS) chars[r * COLS + c] = 0;
+    const show = smooth(0, 0.22, q), hide = mix;
+    for (let r = box.top; r <= nm.bottom; r++) for (let c = cc - 1; c < Math.min(COLS, cc + bw + 2); c++) {
+      const v = nm[r * COLS + c]; if (v < 0.3) continue;
+      const bv = bayer(c, r); if (bv > show || bv < hide) continue;
+      chars[r * COLS + c] = -1; dens[r * COLS + c] = 0.84; colr[r * COLS + c] = INK;
+    }
+    write(`${cur.n} / 05`, cc, box.top - 1 < 0 ? 0 : box.top, ACC);
+    cur.lines.forEach((ln, j) => write(ln, cc, rr + j, INK, Math.max(0, typed - j * 34)));
+    window.__c2c = { t, p, k, q, mix, theme: themeIdx, chars: cur.lines.reduce((a, ln, j) => a + Math.min(ln.length, Math.max(0, typed - j * 34)), 0), pings: pings.length };
+  }
+
+  // 4. pointer heat + click stamps
+  const pr = 9;
+  if (pointer.on) for (let r = pointer.r - 6; r <= pointer.r + 6; r++) for (let c = pointer.c - pr; c <= pointer.c + pr; c++) {
+    if (c < 0 || r < 0 || c >= COLS || r >= ROWS) continue;
+    const d = Math.hypot((c - pointer.c) * CW, (r - pointer.r) * CH) / (pr * CW);
+    if (d > 1) continue;
+    const i = r * COLS + c, h = (1 - d) * (1 - d);
+    dens[i] = Math.min(1, dens[i] + h * 0.55 * (0.6 + 0.4 * fbm(c * 0.3, r * 0.3 + t)));
+    if (h > 0.3) colr[i] = ACC;
+  }
+  for (let j = pings.length - 1; j >= 0; j--) {
+    const pg = pings[j], age = (now - pg.born) / 1000 / 1.6;
+    if (age > 1) { pings.splice(j, 1); continue; }
+    const sc = 0.6 + 2.6 * (1 - Math.pow(1 - age, 3)), keep = 1 - age;
+    const bw = BEAN_BITMAP[0].length, bh = BEAN_BITMAP.length;
+    const cellsW = Math.ceil(bw * sc), cellsH = Math.ceil(bh * sc * CW / CH * 1.6);
+    for (let rr = 0; rr < cellsH; rr++) for (let cc = 0; cc < cellsW; cc++) {
+      const bx = Math.floor(cc / cellsW * bw), by = Math.floor(rr / cellsH * bh);
+      if (BEAN_BITMAP[by][bx] !== '#') continue;
+      const c = pg.c - (cellsW >> 1) + cc, r = pg.r - (cellsH >> 1) + rr;
+      if (c < 0 || r < 0 || c >= COLS || r >= ROWS || bayer(c, r) > keep) continue;
+      chars[r * COLS + c] = GI.get('@'); colr[r * COLS + c] = ACC;
+    }
+  }
+
+  // 5. draw: ramp inside, edge glyphs on silhouettes, faint dot ground
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = theme().bg; ctx.fillRect(0, 0, innerWidth, innerHeight);
+  const aw = CW * dpr, ah = CH * dpr, dot = GI.get('·');
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const i = r * COLS + c;
+    let g = chars[i], col = colr[i];
+    if (g < 0) {
+      const d = dens[i];
+      if (d > 0.04) {
+        const l = c > 0 ? dens[i - 1] : 0, rt = c < COLS - 1 ? dens[i + 1] : 0, u = r > 0 ? dens[i - COLS] : 0, dn = r < ROWS - 1 ? dens[i + COLS] : 0;
+        if (d > 0.12 && ((l < 0.04 && rt > 0.12) || (rt < 0.04 && l > 0.12) || (u < 0.04 && dn > 0.12) || (dn < 0.04 && u > 0.12))) {
+          const gx = (rt - l), gy = (dn - u) * CW / CH;
+          let a = Math.atan2(gy, gx) * 180 / Math.PI; a = (a + 180) % 180;
+          g = GI.get(EDGE[a < 22.5 || a >= 157.5 ? 0 : a < 67.5 ? 1 : a < 112.5 ? 2 : 3]);
+        } else g = GI.get(RAMP[Math.min(RAMP.length - 1, Math.floor(d * RAMP.length))]);
+      } else { if ((c + r) & 1) continue; g = dot; col = FAINT; }
+    }
+    if (g === 0) continue;
+    ctx.drawImage(atlas, g * aw, col * ah, aw, ah, c * CW, r * CH, CW, CH);
+  }
+  requestAnimationFrame(frame);
+}
+
+// ---------------------------------------------------------------- ui
+const themeBtn = document.getElementById('themeBtn');
+function cycleTheme() {
+  themeIdx = (themeIdx + 1) % THEMES.length;
+  try { localStorage.setItem('c2c-theme', theme().name); } catch (e) {}
+  buildAtlas();
+}
+themeBtn.addEventListener('click', cycleTheme);
+addEventListener('keydown', e => { if ((e.key === 't' || e.key === 'T') && !e.metaKey && !e.ctrlKey) cycleTheme(); });
+const nav = document.querySelector('nav');
+CHAPTERS.forEach((ch, i) => {
+  const b = document.createElement('button'); b.type = 'button'; b.textContent = i === 0 ? '00' : ch.n;
+  b.setAttribute('aria-label', i === 0 ? 'Top' : `Chapter ${ch.n}: ${ch.title.toLowerCase()}`);
+  b.addEventListener('click', () => scrollTo({ top: (i + 0.02) / (CHAPTERS.length - 0.35) * (document.documentElement.scrollHeight - innerHeight), behavior: reduced ? 'auto' : 'smooth' }));
+  nav.appendChild(b);
+});
+addEventListener('scroll', () => {
+  const k = Math.floor(scrollY / Math.max(1, document.documentElement.scrollHeight - innerHeight) * (CHAPTERS.length - 0.35));
+  nav.querySelectorAll('button').forEach((b, i) => b.setAttribute('aria-current', i === k ? 'true' : 'false'));
+}, { passive: true });
+addEventListener('pointermove', e => { pointer = { c: Math.floor(e.clientX / CW), r: Math.floor(e.clientY / CH), on: e.pointerType === 'mouse' }; });
+addEventListener('pointerleave', () => { pointer.on = false; });
+cv.addEventListener('pointerdown', e => { pings.push({ c: Math.floor(e.clientX / CW), r: Math.floor(e.clientY / CH), born: performance.now() }); });
+// ---------------------------------------------------------------- background music (not scroll-reactive)
+// audio/loop.mp3 holds two identical cycles of an 8-bar loop; looping any LOOP-long window inside it is
+// seamless regardless of the encoder's start padding. Starts on the first click/key (autoplay policy).
+const LOOP = 8 * 4 * 60 / 84, soundBtn = document.getElementById('soundBtn');
+let actx = null, gain = null, soundOn = false, wanted = true;
+try { wanted = localStorage.getItem('c2c-sound') !== 'off'; } catch (e) {}
+async function startSound() {
+  if (!actx) {
+    actx = new (window.AudioContext || window.webkitAudioContext)();
+    gain = actx.createGain(); gain.gain.value = 0; gain.connect(actx.destination);
+    try {
+      const buf = await actx.decodeAudioData(await (await fetch('audio/loop.mp3')).arrayBuffer());
+      const src = actx.createBufferSource(); src.buffer = buf; src.loop = true;
+      src.loopStart = 4; src.loopEnd = 4 + LOOP; src.connect(gain); src.start();
+    } catch (e) { soundBtn.textContent = '[M] sound: n/a'; return; }
+  }
+  await actx.resume();
+  gain.gain.cancelScheduledValues(actx.currentTime); gain.gain.setTargetAtTime(0.7, actx.currentTime, 0.6);
+  setSound(true);
+}
+function stopSound() { if (actx) gain.gain.setTargetAtTime(0, actx.currentTime, 0.25); setSound(false); }
+function setSound(on) { soundOn = on; soundBtn.textContent = `[M] sound: ${on ? 'on' : 'off'}`; soundBtn.setAttribute('aria-pressed', String(on)); }
+function toggleSound() { wanted = !soundOn; try { localStorage.setItem('c2c-sound', wanted ? 'on' : 'off'); } catch (e) {} wanted ? startSound() : stopSound(); }
+soundBtn.addEventListener('click', e => { e.stopPropagation(); toggleSound(); });
+addEventListener('keydown', e => { if ((e.key === 'm' || e.key === 'M') && !e.metaKey && !e.ctrlKey) toggleSound(); });
+const firstGesture = e => { if (e.target === soundBtn || (e.key && e.key.toLowerCase() === 'm')) return; if (wanted && !soundOn) startSound(); removeEventListener('pointerdown', firstGesture); removeEventListener('keydown', firstGesture); };
+addEventListener('pointerdown', firstGesture); addEventListener('keydown', firstGesture);
+
+let rs; addEventListener('resize', () => { clearTimeout(rs); rs = setTimeout(layout, 120); });
+
+Promise.all([document.fonts.load('800 16px "JetBrains Mono"'), document.fonts.load('100px "Archivo Black"'), document.fonts.load('900 100px "Big Shoulders Display"')]).finally(() => {
+  layout(); requestAnimationFrame(frame);
+});
+})();
+</script>
+</body>
+</html>

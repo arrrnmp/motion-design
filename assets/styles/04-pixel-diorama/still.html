@@ -1,0 +1,184 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>html,body{margin:0;background:#181425}canvas{display:block;image-rendering:pixelated;width:1920px;height:1080px}</style>
+<script src="../../lib/font5x7.js"></script>
+</head><body><canvas id="c" width="480" height="270"></canvas>
+<script>
+/* PIXEL DIORAMA (v2) — golden hour on a coffee mountainside, 480x270 native, x4 nearest-neighbour.
+   Endesga-32 palette only (no blending), 4x4 Bayer dither between ramp steps, light from a low sun:
+   rim light on every silhouette facing it, dark backlit foreground, hazy layered ranges, god rays.
+   Motion rule: stepped, never tweened: clouds shift 1px every few frames, smoke loops 8 frames,
+   cherries glint on a 2-frame blink, the picker walks a 4-frame cycle; camera moves in whole pixels. */
+const W = 480, H = 270;
+const PAL = ['#be4a2f','#d77643','#ead4aa','#e4a672','#b86f50','#733e39','#3e2731','#a22633','#e43b44','#f77622','#feae34','#fee761','#63c74d','#3e8948','#265c42','#193c3e','#124e89','#0099db','#2ce8f5','#ffffff','#c0cbdc','#8b9bb4','#5a6988','#3a4466','#262b44','#181425','#ff0044','#68386c','#b55088','#f6757a','#e8b796','#c28569'];
+const C = {}; ['rust','ochre','cream','tan','clay','brown','umber','wine','red','orange','amber','yellow','lime','green','pine','deep','navy','blue','cyan','white','mist','slate','steel','dusk','night','ink','hot','plum','mauve','rose','blush','sand'].forEach((n, i) => C[n] = i);
+const buf = new Uint8Array(W * H).fill(C.night);
+const set = (x, y, c) => { x |= 0; y |= 0; if (x >= 0 && y >= 0 && x < W && y < H) buf[y * W + x] = c; };
+const get = (x, y) => buf[(y | 0) * W + (x | 0)];
+const B4 = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
+const dith = (x, y, t) => t * 16 > B4[y & 3][x & 3] + 0.5;
+let sd = 3; const rnd = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
+const P = new Float32Array(512); for (let i = 0; i < 512; i++) P[i] = rnd();
+const h2 = (x, y) => P[((x * 73 + y * 151) % 512 + 512) % 512];
+function vn(x, y) { const X = Math.floor(x), Y = Math.floor(y), fx = x - X, fy = y - Y, s = t => t * t * (3 - 2 * t);
+  const a = h2(X, Y), b = h2(X + 1, Y), c = h2(X, Y + 1), d = h2(X + 1, Y + 1);
+  return a + (b - a) * s(fx) + (c - a) * s(fy) + (a - b - c + d) * s(fx) * s(fy); }
+const fbm = (x, y) => vn(x, y) * .5 + vn(x * 2, y * 2) * .25 + vn(x * 4, y * 4) * .125 + vn(x * 8, y * 8) * .0625;
+const ramp = (x, y, steps, t) => { t = Math.max(0, Math.min(0.9999, t)) * (steps.length - 1); const i = Math.floor(t); return dith(x, y, t - i) ? steps[Math.min(i + 1, steps.length - 1)] : steps[i]; };
+const SUN = { x: 352, y: 132 };
+
+// ---------------------------------------------------------------- sky + clouds + sun
+const SKY = [C.night, C.dusk, C.plum, C.mauve, C.rose, C.blush, C.amber, C.yellow];
+for (let y = 0; y < 170; y++) for (let x = 0; x < W; x++) {
+  const d = Math.hypot((x - SUN.x) * 0.6, y - SUN.y);
+  set(x, y, ramp(x, y, SKY, y / 160 * 0.72 + Math.max(0, 1 - d / 190) * 0.32));
+}
+for (let y = 18; y < 118; y++) for (let x = 0; x < W; x++) {
+  const band = Math.exp(-Math.pow((y - 62) / 34, 2));
+  const d = fbm(x / 46, y / 9) * band - 0.26;
+  if (d <= 0) continue;
+  const lit = fbm((x - 3) / 46, (y - 3) / 9) * band - 0.26 < d ? 1 : 0;
+  const near = Math.max(0, 1 - Math.hypot(x - SUN.x, y - SUN.y) / 200);
+  set(x, y, ramp(x, y, [C.plum, C.mauve, C.rose, C.blush, C.yellow], 0.15 + lit * 0.35 + near * 0.55 - (d > 0.12 ? 0.12 : 0)));
+}
+for (let y = -22; y <= 22; y++) for (let x = -22; x <= 22; x++) { const r = Math.hypot(x, y); if (r < 18) set(SUN.x + x, SUN.y + y, r < 14 ? C.white : C.yellow); }
+const UP = { [C.night]: C.dusk, [C.dusk]: C.plum, [C.plum]: C.mauve, [C.mauve]: C.rose, [C.rose]: C.blush, [C.pine]: C.green, [C.deep]: C.pine };
+function rays(yMax) {
+  for (let y = 0; y < yMax; y++) for (let x = 0; x < W; x++) {
+    const a = Math.atan2(y - SUN.y, x - SUN.x);
+    if (Math.sin(a * 11 + 0.7) < 0.55 || (x + y * 3) % 5) continue;
+    const up = UP[get(x, y)]; if (up !== undefined) set(x, y, up);
+  }
+}
+
+// ---------------------------------------------------------------- mountain ranges, rim-lit toward the sun
+function range(base, amp, sc, seed, fill, rim, hazeTop) {
+  const top = new Int16Array(W);
+  for (let x = 0; x < W; x++) top[x] = Math.round(base - amp * fbm(x / sc + seed, seed * 3.1) - amp * 0.35 * Math.abs(Math.sin(x / (sc * 0.7) + seed)));
+  for (let x = 0; x < W; x++) for (let y = top[x]; y < H; y++) {
+    let c = fill;
+    if (hazeTop && y < top[x] + 6 && dith(x, y, 1 - (y - top[x]) / 6)) c = hazeTop;
+    const slope = top[Math.min(W - 1, x + 1)] - top[Math.max(0, x - 1)];
+    const facing = x < SUN.x ? slope > 0 : slope < 0;
+    if (y <= top[x] + (facing ? 1 : 0) && Math.abs(x - SUN.x) < 220) c = rim;
+    set(x, y, c);
+  }
+  return top;
+}
+range(150, 44, 60, 1.3, C.mauve, C.blush, C.rose);
+range(162, 34, 44, 4.1, C.plum, C.rose, null);
+rays(175);
+range(176, 22, 36, 7.7, C.dusk, C.mauve, null);
+
+// ---------------------------------------------------------------- terraced coffee hill
+const hillTop = new Int16Array(W);
+for (let x = 0; x < W; x++) hillTop[x] = Math.round(150 + 40 * Math.pow(x / W, 1.4) + 10 * fbm(x / 40, 9) - 18 * Math.exp(-Math.pow((x - 150) / 110, 2)));
+for (let x = 0; x < W; x++) for (let y = hillTop[x]; y < H; y++) {
+  set(x, y, ramp(x, y, [C.deep, C.pine, C.green], (x / W) * 0.6 + 0.2 - (y - hillTop[x]) / 200));
+  if (y <= hillTop[x] + 1) set(x, y, x > 200 ? C.amber : C.lime);
+  else if (y <= hillTop[x] + 3 && x > 230 && dith(x, y, 0.5)) set(x, y, C.ochre);
+}
+for (let row = 0; row < 7; row++) {
+  const off = 8 + row * 11 + row * row * 0.6;
+  for (let x = 4; x < W; x += 7 + (row > 3 ? 1 : 0)) {
+    const y = hillTop[x] + off + Math.round(1.5 * Math.sin(x / 23 + row));
+    if (y > 238) continue;
+    const s = 2 + (row > 2 ? 1 : 0) + (row > 5 ? 1 : 0);
+    for (let dy = -s; dy <= 1; dy++) for (let dx = -s - 1; dx <= s + 1; dx++) {
+      if ((dx * dx) / ((s + 1.2) ** 2) + (dy * dy) / (s * s) > 1) continue;
+      set(x + dx, y + dy, dx > 0 && dy < 0 ? (x > 220 && dy === -s ? C.amber : C.lime) : dy > 0 ? C.deep : C.green);
+    }
+    set(x - s - 2, y + 1, C.deep); set(x - s - 3, y + 1, C.deep);
+    if (h2(x, row) > 0.3) set(x - 1 + (h2(row, x) * 3 | 0), y - 1 + (h2(x, x) * 2 | 0), C.red);
+    if (h2(x + 5, row) > 0.7) set(x + 1, y, C.red);
+  }
+}
+
+// ---------------------------------------------------------------- winding path + shade trees
+{
+  let px = 330, py = 269;
+  const pts = []; for (let t = 0; t <= 1; t += 0.004) { pts.push([330 + 70 * t + 26 * Math.sin(t * 9), 269 - (269 - (hillTop[405] + 29)) * t]); }
+  pts.forEach(([x, y]) => { const w = 1 + Math.round((y - 170) / 40); for (let k = -w - 1; k <= w + 1; k++) set(x + k, y, Math.abs(k) > w ? C.clay : dith(x + k, y, 0.3) ? C.sand : C.tan); });
+}
+function shadeTree(x, h, rx) {
+  const base = hillTop[x] + 6 + Math.round(h / 3), topY = base - h;
+  for (let y = topY; y <= base; y++) { set(x, y, C.ink); set(x + 1, y, y < base - 4 ? C.umber : C.ink); }
+  for (let y = -rx / 2.4; y <= rx / 3; y++) for (let dx = -rx; dx <= rx; dx++) {
+    const e = (dx * dx) / (rx * rx) + (y * y) / ((rx / 2.4) ** 2) + 0.25 * fbm((x + dx) / 4, (topY + y) / 3);
+    if (e > 1.15) continue;
+    const X = x + dx, Y = topY + y;
+    const tw = Math.sign(SUN.x - x) * dx > 0;
+    set(X, Y, e > 0.8 && tw && y < 1 ? C.orange : e > 0.95 && tw ? C.amber : dith(X, Y, 0.3) ? C.deep : C.ink);
+  }
+  for (let i = 0; i < rx + 8; i++) { const sx = x - Math.sign(SUN.x - x) * i; if (dith(sx, base + 1, 0.8)) set(sx, base + 1, C.deep); }
+}
+shadeTree(214, 26, 18); shadeTree(318, 34, 22); shadeTree(452, 30, 20); shadeTree(186, 20, 13);
+
+// ---------------------------------------------------------------- roastery in the valley
+function rect(x, y, w, h, c) { for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) set(x + i, y + j, c); }
+const RX = 392, RY = hillTop[392] + 6;
+rect(RX - 1, RY - 1, 34, 24, C.ink); rect(RX, RY, 32, 22, C.clay); rect(RX, RY, 6, 22, C.brown);
+for (let j = 0; j < 22; j += 4) for (let i = 7; i < 32; i += 7) rect(RX + i + (j % 8 ? 3 : 0), RY + j + 2, 1, 1, C.brown);
+for (let i = 0; i < 20; i++) rect(RX - 3 + i, RY - 1 - Math.floor(i / 1.5), 40 - 2 * i, 1, i % 3 ? C.wine : C.rust);
+rect(RX + 22, RY - 20, 5, 12, C.umber); rect(RX + 22, RY - 21, 5, 1, C.ink);
+[[RX + 9, RY + 6], [RX + 20, RY + 6]].forEach(([x, y]) => { rect(x - 1, y - 1, 6, 7, C.ink); rect(x, y, 4, 5, C.amber); rect(x, y, 4, 1, C.yellow); set(x + 1, y + 2, C.orange); });
+rect(RX + 12, RY + 13, 7, 9, C.ink); rect(RX + 13, RY + 14, 5, 8, C.umber); set(RX + 17, RY + 18, C.amber);
+for (let k = 0; k < 20; k++) { const px = RX + 24 + Math.round(Math.sin(k * 0.5) * 3) - k * 1.4, py = RY - 24 - k * 2.2, r = 2 + k / 6;
+  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (dx * dx + dy * dy <= r * r && dith(px + dx, py + dy, 0.8 - k / 26)) set(px + dx, py + dy, dx > 0 ? C.blush : C.rose); }
+for (let y = RY + 22; y < RY + 34; y++) for (let x = RX - 10; x < RX + 44; x++) if (dith(x, y, 0.22 - (y - RY - 22) / 50)) set(x, y, C.ochre);
+
+// ---------------------------------------------------------------- picker, long shadow away from the sun
+const PK = { x: 250, y: hillTop[250] + 34 };
+const sprite = ['....1111....', '...122221...', '..12222221..', '...133331...', '...1333331..', '....1331....', '...144441...', '..14444441..',
+  '..14144414..', '..1314413...', '...144441...', '...155551...', '...15..51...', '...15..51...', '...11..11...'];
+const pc = { 1: C.ink, 2: C.sand, 3: C.tan, 4: C.navy, 5: C.umber };
+for (let i = 0; i < 26; i++) set(PK.x + 2 - i, PK.y + 15, C.deep);
+sprite.forEach((row, y) => [...row].forEach((ch, x) => { if (pc[ch] !== undefined) set(PK.x + x, PK.y + y, pc[ch]); }));
+for (let y = 6; y < 12; y++) { const i = sprite[y].lastIndexOf('4'); if (i > 0) set(PK.x + i, PK.y + y, C.blue); }   // sun-side rim
+rect(PK.x + 10, PK.y + 7, 7, 5, C.ink); rect(PK.x + 11, PK.y + 8, 5, 3, C.clay); [[11, 6], [13, 5], [15, 6]].forEach(([dx, dy]) => set(PK.x + dx, PK.y + dy, C.red));
+for (let x = -1; x < 13; x++) set(PK.x + x, PK.y + (x > 3 && x < 8 ? -1 : 0), C.sand);
+
+// ---------------------------------------------------------------- foreground branch, backlit
+function blob(cx, cy, rx, ry, rot, body, rim, dark) {
+  const c = Math.cos(rot), s = Math.sin(rot);
+  for (let y = -ry - 2; y <= ry + 2; y++) for (let x = -rx - 2; x <= rx + 2; x++) {
+    const u = (x * c + y * s) / rx, v = (-x * s + y * c) / ry, d = u * u + v * v;
+    if (d > 1) continue;
+    const X = cx + x, Y = cy + y;
+    const toward = ((SUN.x - X) * x + (SUN.y - Y) * y) / (Math.hypot(SUN.x - X, SUN.y - Y) * Math.hypot(x, y) + 1e-6);
+    set(X, Y, d > 0.72 && toward > 0.35 ? rim : (d < 0.3 && dark !== undefined && dith(X, Y, 0.5) ? dark : body));
+  }
+}
+for (let t = 0; t <= 1; t += 0.002) {
+  const x = -10 + 190 * t, y = 290 - 170 * t + 40 * Math.sin(t * 3);
+  for (let k = -2; k <= 2; k++) set(x, y + k, k === -2 ? C.orange : C.ink);
+}
+const LEAVES = [[40, 214, 26, 9, -0.9], [70, 172, 30, 10, -1.25], [96, 208, 28, 9, 0.35], [124, 160, 26, 9, -0.6], [150, 186, 30, 9, 0.7], [20, 250, 30, 10, -0.3], [170, 138, 22, 8, -1.1], [110, 236, 24, 8, 0.9]];
+LEAVES.forEach(([x, y, rx, ry, r]) => {
+  blob(x, y, rx, ry, r, C.deep, C.orange, C.ink);
+  for (let t = -0.85; t <= 0.85; t += 0.02) set(x + Math.cos(r) * rx * t, y + Math.sin(r) * rx * t, C.pine);
+});
+const CHERRIES = [[62, 196], [70, 200], [66, 206], [58, 204], [112, 184], [120, 188], [116, 194], [138, 170], [144, 176], [30, 238], [37, 242], [158, 158], [164, 162]];
+CHERRIES.forEach(([x, y]) => blob(x, y, 5, 5, 0, C.wine, C.hot, C.umber));
+CHERRIES.forEach(([x, y]) => { set(x + 2, y - 2, C.rose); set(x + 3, y - 2, C.white); });
+for (let i = 0; i < 40; i++) set(180 + rnd() * 290, 150 + rnd() * 110, rnd() > 0.5 ? C.yellow : C.amber);
+
+// ---------------------------------------------------------------- title: banded pixel wordmark
+function glyphs(str, x, y, s, colorAtRow, outline, shadow) {
+  const cells = [];
+  [...str].forEach((ch, i) => { const g = FONT5x7[ch] || FONT5x7[' ']; for (let r = 0; r < 7; r++) for (let q = 0; q < 5; q++) if (g[r * 5 + q] === '#') for (let a = 0; a < s; a++) for (let b = 0; b < s; b++) cells.push([x + i * 6 * s + q * s + b, y + r * s + a, r * s + a]); });
+  if (shadow !== undefined) cells.forEach(([cx, cy]) => { set(cx + 2, cy + 3, shadow); set(cx + 1, cy + 3, shadow); });
+  if (outline !== undefined) cells.forEach(([cx, cy]) => { for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) set(cx + dx, cy + dy, outline); });
+  cells.forEach(([cx, cy, row]) => set(cx, cy, colorAtRow(row)));
+}
+const BANDS = [C.white, C.yellow, C.yellow, C.amber, C.amber, C.orange, C.orange, C.rust, C.wine];
+glyphs('FROM CHERRY', 16, 14, 3, r => BANDS[Math.floor(r / 21 * BANDS.length)], C.ink, C.night);
+glyphs('TO CUP', 16, 42, 3, r => BANDS[Math.floor(r / 21 * BANDS.length)], C.ink, C.night);
+glyphs('EVERY CHERRY HIDES TWO SEEDS', 18, 72, 1, () => C.blush, C.ink);
+
+// ---------------------------------------------------------------- blit
+const out = document.getElementById('c').getContext('2d'), img = out.createImageData(W, H);
+const rgb = PAL.map(hx => [1, 3, 5].map(i => parseInt(hx.slice(i, i + 2), 16)));
+for (let i = 0; i < W * H; i++) { const c = rgb[buf[i]]; img.data[i * 4] = c[0]; img.data[i * 4 + 1] = c[1]; img.data[i * 4 + 2] = c[2]; img.data[i * 4 + 3] = 255; }
+out.putImageData(img, 0, 0);
+</script></body></html>

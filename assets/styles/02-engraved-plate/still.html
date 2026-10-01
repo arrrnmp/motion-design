@@ -1,0 +1,75 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Libre+Caslon+Display&display=block" rel="stylesheet">
+<style>html,body{margin:0;background:#efe8da}canvas{display:block}</style>
+<script src="../../lib/print.js"></script>
+</head><body><canvas id="c" width="1920" height="1080"></canvas>
+<script>
+/* ENGRAVED PLATE (v3) — a printed engraving. The cherry is cut as latitude lines that swell into
+   the shadow (black ink on cream paper); the two seeds are the only colour, a vermilion spot plate
+   printed slightly off register. One big Caslon title, one line of copy. Nothing else.
+   Motion rule: the burin engraves the lines on, one after another; then the plate is inked and the
+   spot colour lands; holds are long. */
+window.__ready = false;
+const W = 1920, H = 1080;
+const K = makePlate(W, H), SPOT = makePlate(W, H);
+const norm = v => { const l = Math.hypot(...v); return v.map(q => q / l); };
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const L = norm([-0.55, -0.6, 0.58]);
+
+// latitude lines on a tilted ellipsoid; line width grows with shadow, thin hairline in the light
+function engrave(ctx, cx, cy, rx, ry, rz, axis, gap, wMax, wMin = 0.35) {
+  const a = norm(axis), t0 = norm(cross(a, Math.abs(a[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0])), t1 = cross(a, t0);
+  const n = Math.floor(2 * Math.max(rx, ry) / gap);
+  ctx.strokeStyle = '#000'; ctx.lineCap = 'round';
+  for (let i = 1; i < n; i++) {
+    const sp = -1 + 2 * i / n, cp = Math.sqrt(1 - sp * sp);
+    let prev = null;
+    for (let k = 0; k <= 260; k++) {
+      const t = k / 260 * Math.PI * 2;
+      const u = [0, 1, 2].map(j => cp * Math.cos(t) * t0[j] + cp * Math.sin(t) * t1[j] + sp * a[j]);
+      const nr = norm([u[0] / rx, u[1] / ry, u[2] / rz]);
+      if (nr[2] <= 0.0) { prev = null; continue; }
+      const lit = Math.max(0, nr[0] * L[0] + nr[1] * L[1] + nr[2] * L[2]);
+      const w = wMin + (wMax - wMin) * Math.pow(1 - lit, 1.6);
+      const pt = [cx + u[0] * rx, cy + u[1] * ry];
+      if (prev && lit < 0.985 - 0.03 * Math.sin(i * 2.1 + k * 0.11)) { ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(...prev); ctx.lineTo(...pt); ctx.stroke(); }
+      prev = pt;
+    }
+  }
+}
+
+async function main() {
+  await document.fonts.load('100px "Libre Caslon Display"');
+  // cherry: engraved form + a firm contour on the shadow side
+  const C = { x: 1260, y: 570, r: 310 };
+  engrave(K, C.x, C.y, C.r, C.r, C.r, [0.35, -0.9, 0.25], 9, 5.2);
+  K.lineWidth = 3; K.beginPath(); K.arc(C.x, C.y, C.r, -0.35, Math.PI * 0.95); K.stroke();
+  // stem: a few parallel burin strokes
+  for (let k = 0; k < 6; k++) { K.lineWidth = 3.2 - k * 0.45; K.beginPath(); K.moveTo(C.x + 22 + k * 2, C.y - C.r + 8); K.bezierCurveTo(C.x + 28 + k, C.y - C.r - 60, C.x + 70 + k * 2, C.y - C.r - 110, C.x + 132 + k * 3, C.y - C.r - 124 + k * 2); K.stroke(); }
+  // two seeds (spot colour), engraved with the same line, plus their crease
+  const seed = (x, y, rot) => {
+    for (const [ctx, wMax] of [[SPOT, 4.6], [K, 1.4]]) {
+      ctx.save(); ctx.translate(x, y); ctx.rotate(rot);
+      engrave(ctx, 0, 0, 70, 104, 42, [0.1, -1, 0.15], 6.5, wMax, ctx === K ? 0.0 : 1.2);
+      ctx.restore();
+    }
+    K.save(); K.translate(x, y); K.rotate(rot); K.lineWidth = 3.4; K.beginPath(); K.moveTo(-4, -92); K.bezierCurveTo(26, -34, -26, 20, 4, 92); K.stroke(); K.restore();
+  };
+  seed(1720, 400, -0.35); seed(1780, 720, 0.3);
+
+  // type: one Caslon title, one line
+  K.fillStyle = '#000'; K.textBaseline = 'alphabetic';
+  K.font = '150px "Libre Caslon Display"';
+  ['From', 'cherry', 'to cup'].forEach((w, i) => K.fillText(w, 120, 330 + i * 150));
+  K.font = 'italic 40px "Libre Caslon Display"';
+  K.fillText('Every cherry holds two seeds.', 124, 820);
+
+  printPlates(document.getElementById('c'), [
+    { ctx: SPOT, rgb: [226, 72, 36], angle: 15, cell: 7, offset: [4, -3], solidAt: 0.45, speckle: 0.02, roller: 0.1 },
+    { ctx: K, rgb: [28, 24, 22], angle: 45, cell: 5, offset: [0, 0], solidAt: 0.45, speckle: 0.015, roller: 0.12 },
+  ], [239, 232, 218], { age: 0, seed: 22 });
+  window.__ready = true;
+}
+main();
+</script></body></html>
