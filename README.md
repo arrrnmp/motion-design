@@ -59,5 +59,4 @@ Contributions and pull requests are welcome; contributions are accepted under th
 same AGPL-3.0-or-later terms.
 
 Every third-party asset the skill bundles or loads is recorded in
-[THIRD_PARTY.md](THIRD_PARTY.md) with its license, including one item still
-needing provenance review.
+[THIRD_PARTY.md](THIRD_PARTY.md) with its license and provenance.

@@ -1,4 +1,11 @@
-// 5x7 bitmap font: 35 chars per glyph, row-major, '#' = ink
+// 5x7 bitmap font: 35 cells per glyph, row-major, '#' = ink. 38 glyphs.
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Aaron Mompié
+// This file is part of motion-design (https://github.com/arrrnmp/motion-design).
+//
+// Glyphs are original to this project, drawn for the 04-pixel-diorama style
+// (and reused by 16-cross-stitch). Not transcribed from, derived from, or
+// copied out of any third-party font table. Provenance: first-party.
 const FONT5x7 = {
 'G':'.###.#...##....#.####...##...#.###.',
 'J':'..###...#....#....#.#..#.#..#..##..',

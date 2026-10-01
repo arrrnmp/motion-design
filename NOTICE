@@ -39,5 +39,4 @@ Hershey single-stroke glyph data, which is in the public domain.
 
 Every third-party asset this skill bundles or loads — web fonts, Python
 packages, ffmpeg, Blender, system fonts — is recorded with its license in
-THIRD_PARTY.md. That file has one open item: the provenance of
-assets/lib/font5x7.js is unverified.
+THIRD_PARTY.md. No open provenance items remain.

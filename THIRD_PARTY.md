@@ -18,23 +18,18 @@ skill itself.
 |---|---|---|---|
 | `assets/lib/hershey.json` | Hershey single-stroke glyph data (`futural`, `timesr`, `scripts`, `hershey_sans_med`), from the US National Bureau of Standards digitization of Dr. Allen V. Hershey's glyph set | **Public domain** (US Government work) | Re-encoded to JSON polylines by this project. No third-party code bundled. |
 | `assets/lib/hershey.js` | Original wrapper written for this skill | AGPL-3.0-or-later | — |
-| `assets/lib/font5x7.js` | **Provenance unverified** — see below | **Unknown** | ⚠️ Needs review before any redistribution claim |
+| `assets/lib/font5x7.js` | Glyphs original to this project, drawn for the 04-pixel-diorama style and reused by 16-cross-stitch | AGPL-3.0-or-later | 38 glyphs, 5×7 cells each. Not derived from any third-party font table. |
 
-### ⚠️ `assets/lib/font5x7.js`
+### `assets/lib/font5x7.js` — provenance resolved
 
-A 5×7 bitmap font, 35 glyphs, row-major `#`/`.` encoding. Widely circulated 5×7 tables
-of this general shape exist in many Arduino/embedded projects under a variety of terms
-(public domain, BSD, GPL), and this file carries **no upstream attribution comment**.
+A 5×7 bitmap font (38 glyphs: digits, uppercase, `G J Q X ! - . , ' >` and a space),
+row-major `#`/`.` encoding. The glyphs are **original to this project**, authored for
+the 04-pixel-diorama style, where a 5×7 face that scales to whole pixels is the point;
+16-cross-stitch reuses it.
 
-Before treating this file as safely redistributable, confirm one of:
-
-- it was transcribed by hand from the original NBS 5×7 stroke tables (→ public domain), or
-- it came from a specific upstream, in which case record that project and its license here
-  and add an attribution comment to the file.
-
-Until then, treat it as **all-rights-reserved by this project** (covered by `LICENSE`),
-which is safe for AGPL redistribution but may be incomplete attribution to a third party.
-This is the one open item in the audit.
+It is not transcribed from or copied out of any third-party font table, so no
+attribution is owed and no additional terms apply. The file now carries this statement
+inline, so a reader of the file alone reaches the same conclusion.
 
 ### Generated media (first-party, no third-party license)
 
